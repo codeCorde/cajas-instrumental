@@ -108,3 +108,57 @@ export const TIPO_LABEL: Record<Tipo, string> = {
 };
 
 export const TIPOS_NOTA = ["General", "Herramienta", "Medición", "Proceso", "Calidad", "Proveedor"];
+
+// ---------------- Novedades (registro de cambios) ----------------
+export type OrigenNovedad = "app" | "manual" | "claude" | "sistema";
+
+export interface Novedad {
+  id: number;
+  creado_en: string;
+  autor_nombre: string | null;
+  origen: OrigenNovedad;
+  seccion: string;
+  titulo: string;
+  detalle: string | null;
+}
+
+export const ORIGEN_NOVEDAD_LABEL: Record<OrigenNovedad, string> = {
+  app: "Automática",
+  manual: "Nota",
+  claude: "Claude",
+  sistema: "Versión",
+};
+
+export const SECCION_NOVEDAD_LABEL: Record<string, string> = {
+  cajas: "Caja",
+  instrumentales: "Instrumental",
+  partes: "Medida/parte",
+  planos: "Plano",
+  notas: "Nota fabr.",
+  tareas: "Tarea",
+  codigo: "App",
+  general: "General",
+};
+
+// ---------------- Tareas de mejora ----------------
+export type Prioridad = "alta" | "media" | "baja";
+
+export interface Tarea {
+  id: string;
+  titulo: string;
+  detalle: string | null;
+  medico: string | null;
+  caja_id: string | null;
+  instrumental_id: string | null;
+  prioridad: Prioridad;
+  hecha: boolean;
+  hecha_en: string | null;
+  hecha_por_nombre: string | null;
+  creado_por_nombre: string | null;
+  creado_en: string;
+  caja: { id: string; numero: number; nombre: string } | null;
+  instrumental: { id: string; codigo: string; nombre: string } | null;
+}
+
+export const PRIORIDAD_LABEL: Record<Prioridad, string> = { alta: "Alta", media: "Media", baja: "Baja" };
+export const PRIORIDAD_ORDEN: Record<Prioridad, number> = { alta: 0, media: 1, baja: 2 };

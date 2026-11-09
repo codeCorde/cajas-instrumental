@@ -18,6 +18,8 @@ app/
   (app)/cargar/              Carga rápida por QR (paso 1: caja · paso 2: instrumentales)
   (app)/fabricar/            Lista de qué fabricar (por caja o global, objetivo N, CSV, imprimir)
   (app)/planos/              Instrumental de cada caja con sus planos (visor PDF, descarga de DWG/STEP)
+  (app)/tareas/              Tareas de mejora (aclaraciones de médicos) con check «corregido»
+  (app)/novedades/           Registro de cambios: qué se modificó, cuándo y quién
   (app)/historial/           Movimientos con filtros + CSV            [solo admin]
   (app)/admin/               Cajas, instrumentales, medidas/partes, notas, usuarios, QR   [solo admin]
 lib/
@@ -31,6 +33,7 @@ supabase/
   migrations/0002_rls.sql    Permisos y Row Level Security
   migrations/0003_rpc.sql    Funciones de stock: ajustar_stock, armar_caja, entregar_caja
   migrations/0004_planos.sql Tabla de planos + bucket privado «planos» en Storage
+  migrations/0005_novedades_tareas.sql  Novedades (registro de cambios) y Tareas de mejora
   seed.sql                   Datos de ejemplo
 tests/calculos.test.ts       Tests de lib/calculos.ts y lib/armado.ts
 scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres en memoria
@@ -46,7 +49,8 @@ scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres e
    2. `supabase/migrations/0002_rls.sql`
    3. `supabase/migrations/0003_rpc.sql`
    4. `supabase/migrations/0004_planos.sql`
-   5. `supabase/seed.sql` (datos de ejemplo; se puede volver a correr, recrea las cajas 1, 2 y 3)
+   5. `supabase/migrations/0005_novedades_tareas.sql`
+   6. `supabase/seed.sql` (datos de ejemplo; se puede volver a correr, recrea las cajas 1, 2 y 3)
 3. En **Authentication → Sign In / Providers → Email**: dejá habilitado Email. Si no querés que se registre cualquiera,
    desactivá **Allow new users to sign up** (los usuarios los crea el admin desde la app).
 4. En **Authentication → URL Configuration**:
