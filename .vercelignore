@@ -1,0 +1,6 @@
+.env*
+!.env.example
+node_modules
+.next
+tsconfig.tsbuildinfo
+supabase/todo_en_uno.sql

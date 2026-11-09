@@ -1,0 +1,22 @@
+# Dependencias y build
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Variables de entorno: NUNCA se suben (tienen las claves de Supabase)
+.env*
+# …salvo la plantilla, que no tiene claves reales
+!.env.example
+
+# Vercel
+.vercel/
+
+# SQL generado para pegar en Supabase (se arma con los archivos de supabase/)
+supabase/todo_en_uno.sql
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log

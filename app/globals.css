@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------- Tokens (modo claro) ---------- */
+:root {
+  --fondo: #e9ecef;
+  --superficie: #ffffff;
+  --superficie-2: #f4f6f8;
+  --borde: #cfd5db;
+  --texto: #14181d;
+  --tenue: #56606b;
+  --acento: #1d4f7c;
+  --acento-texto: #ffffff;
+
+  --disponible: #13703a;
+  --disponible-bg: #e3f4e9;
+  --proceso: #8a5300;
+  --proceso-bg: #fdf1d8;
+  --falta: #b42318;
+  --falta-bg: #fde7e5;
+  --sin: #5c6570;
+  --sin-bg: #eceef1;
+  color-scheme: light;
+}
+
+/* ---------- Tokens (modo oscuro) ---------- */
+.dark {
+  --fondo: #111417;
+  --superficie: #1a1e23;
+  --superficie-2: #22272d;
+  --borde: #323940;
+  --texto: #e8ebee;
+  --tenue: #a0a9b3;
+  --acento: #78b0e6;
+  --acento-texto: #0b1622;
+
+  --disponible: #5ad38a;
+  --disponible-bg: #143322;
+  --proceso: #f2bb4a;
+  --proceso-bg: #3a2c0d;
+  --falta: #ff8a7e;
+  --falta-bg: #401a17;
+  --sin: #a0a9b3;
+  --sin-bg: #262b31;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-fondo: var(--fondo);
+  --color-superficie: var(--superficie);
+  --color-superficie-2: var(--superficie-2);
+  --color-borde: var(--borde);
+  --color-texto: var(--texto);
+  --color-tenue: var(--tenue);
+  --color-acento: var(--acento);
+  --color-acento-texto: var(--acento-texto);
+  --color-disponible: var(--disponible);
+  --color-disponible-bg: var(--disponible-bg);
+  --color-proceso: var(--proceso);
+  --color-proceso-bg: var(--proceso-bg);
+  --color-falta: var(--falta);
+  --color-falta-bg: var(--falta-bg);
+  --color-sin: var(--sin);
+  --color-sin-bg: var(--sin-bg);
+
+  --font-sans: var(--fuente-texto), system-ui, sans-serif;
+  --font-titulo: var(--fuente-titulo), "Arial Narrow", sans-serif;
+  --font-mono: var(--fuente-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--fondo);
+  color: var(--texto);
+}
+body {
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Foco visible y consistente */
+:focus-visible {
+  outline: 3px solid var(--acento);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  .titulo {
+    font-family: var(--font-titulo);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1.05;
+    text-transform: uppercase;
+  }
+  .card {
+    background: var(--superficie);
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+  }
+  .etiqueta {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--tenue);
+    margin-bottom: 0.25rem;
+  }
+  .campo {
+    width: 100%;
+    min-height: 44px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--borde);
+    border-radius: 4px;
+    background: var(--superficie);
+    color: var(--texto);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 44px;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    border: 1px solid var(--borde);
+    background: var(--superficie);
+    color: var(--texto);
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+  .btn:hover:not(:disabled) {
+    background: var(--superficie-2);
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primario {
+    background: var(--acento);
+    border-color: var(--acento);
+    color: var(--acento-texto);
+  }
+  .btn-primario:hover:not(:disabled) {
+    background: var(--acento);
+    filter: brightness(1.1);
+  }
+  .btn-peligro {
+    color: var(--falta);
+    border-color: var(--falta);
+  }
+  .tabla {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .tabla th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--tenue);
+    padding: 0.5rem;
+    border-bottom: 2px solid var(--borde);
+    white-space: nowrap;
+  }
+  .tabla td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--borde);
+    vertical-align: top;
+  }
+}
+
+@media print {
+  .no-imprimir {
+    display: none !important;
+  }
+  html,
+  body {
+    background: #fff;
+    color: #000;
+  }
+  .card {
+    border: none;
+  }
+}
