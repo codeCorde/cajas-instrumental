@@ -174,3 +174,30 @@ Solo cambian a través de las funciones RPC, que en la misma transacción regist
 Preparado para más adelante (no implementado): QR por pieza o lote (la ruta `/cargar/[cajaId]` ya acepta ir directo
 a una caja; se puede sumar `?i=<instrumental>`), subida de archivos (hoy son links de Drive), importación desde Excel,
 órdenes de producción, clientes y pedidos (la tabla `movimientos` ya tiene `motivo` y `nota` para enlazarlos).
+
+---
+
+## 8. Trabajo en equipo (con Claude Code)
+
+Repositorio privado: <https://github.com/codeCorde/cajas-instrumental>. Cada push a `main` se publica solo en Vercel.
+
+**Primera vez en una compu nueva**
+
+```bash
+git clone https://github.com/codeCorde/cajas-instrumental.git
+cd cajas-instrumental
+npm install
+cp .env.example .env.local   # pedile los valores al admin por un canal privado (nunca por el repo)
+npm run dev
+```
+
+**Cada tarea**
+
+1. `git checkout main && git pull`, después `git checkout -b feat/lo-que-sea`.
+2. Trabajá (con Claude Code abierto en la carpeta del repo: lee `CLAUDE.md` solo y respeta sus reglas).
+3. `npm run typecheck && npm test && npm run test:sql`.
+4. `git push -u origin feat/lo-que-sea` y abrí un Pull Request. GitHub corre el CI y Vercel arma un link de vista previa.
+5. El otro socio revisa, aprueba y mergea. Al mergear a `main`, se publica en producción.
+
+Si el PR trae una migración nueva, el admin la corre en el SQL Editor de Supabase **antes** de mergear.
+La vista previa usa la misma base que producción: cuidado con los datos que se cargan ahí.
