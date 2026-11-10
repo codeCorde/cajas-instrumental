@@ -27,7 +27,7 @@ create table storage.objects (id uuid primary key default gen_random_uuid(), buc
 alter table storage.objects enable row level security;
 grant usage on schema storage to authenticated; grant all on storage.objects to authenticated; grant select on storage.buckets to authenticated;
 `);
-for (const f of ["supabase/migrations/0001_tablas.sql", "supabase/migrations/0002_rls.sql", "supabase/migrations/0003_rpc.sql", "supabase/migrations/0004_planos.sql", "supabase/seed.sql", "supabase/seed.sql"]) {
+for (const f of ["supabase/migrations/0001_tablas.sql", "supabase/migrations/0002_rls.sql", "supabase/migrations/0003_rpc.sql", "supabase/migrations/0004_planos.sql", "supabase/migrations/0005_novedades_tareas.sql", "supabase/seed.sql", "supabase/seed.sql"]) {
   await db.exec(leer(f)); console.log("ok   ", f);
 }
 const ADMIN = "00000000-0000-0000-0000-00000000000a", OP = "00000000-0000-0000-0000-00000000000b";
@@ -110,7 +110,52 @@ await err(`insert into storage.objects (bucket_id, name) values ('planos','x.pdf
 await db.query(`delete from planos`);
 await como(ADMIN);
 ok((await q1(`select count(*)::int n from planos`)).n === 1, "operario NO borra planos");
+
+// ---------- NOVEDADES ----------
+const nov = async (where) => (await db.query(`select * from novedades where ${where} order by id`)).rows;
+const ed = await nov(`seccion='instrumentales' and titulo like 'Edición%Plástico convexo (ed)%'`);
+ok(ed.length === 1 && ed[0].detalle.includes("nombre: Plástico convexo → Plástico convexo (ed)") && ed[0].autor_nombre === "Dueño",
+  `edición de instrumental queda en novedades con autor: ${JSON.stringify(ed[0]?.detalle)}`);
+const antesStock = (await q1(`select count(*)::int n from novedades`)).n;
+await db.query(`select ajustar_stock('${i13}','stock_terminado',1)`);
+ok((await q1(`select count(*)::int n from novedades`)).n === antesStock, "los cambios de stock NO generan novedades (van al historial)");
+ok((await nov(`titulo like 'Alta · Caja 9%'`)).length === 1, "alta de caja registrada");
+ok((await nov(`titulo like 'Alta · Plano Colocador 1-2%'`)).length === 1, "alta de plano registrada");
+const antesMover = (await q1(`select count(*)::int n from novedades`)).n;
+await db.query(`update instrumentales set orden = orden + 1 where id='${i13}'`);
+ok((await q1(`select count(*)::int n from novedades`)).n === antesMover, "cambiar solo el orden no genera novedad");
+await db.query(`delete from cajas where id='${c9}'`);
+ok((await nov(`titulo like 'Baja · Caja 9%'`)).length === 1 && (await nov(`titulo like 'Baja · Instrumental 9.%'`)).length === 0,
+  "baja de caja: 1 novedad (sin una por cada instrumental borrado en cascada)");
+await db.query(`insert into novedades (titulo, detalle) values ('Reunión con el Dr. X', 'Pidió revisar el colocador')`);
+const man = (await nov(`titulo='Reunión con el Dr. X'`))[0];
+ok(man?.origen === "manual" && man?.autor_nombre === "Dueño", "admin agrega nota manual con su nombre");
+await err(`insert into novedades (titulo, origen) values ('x','claude')`, "admin no puede hacerse pasar por Claude/sistema");
+await err(`delete from novedades`, "nadie borra novedades");
+await err(`update novedades set titulo='hack'`, "nadie edita novedades");
+ok((await nov(`titulo='hack'`)).length === 0 && (await q1(`select count(*)::int n from novedades`)).n > 0, "novedades no se editan ni se borran");
+
+// ---------- TAREAS ----------
+const t1 = (await q1(`insert into tareas (titulo, medico, caja_id, instrumental_id, prioridad)
+  values ('Mango del colocador más largo', 'Dr. Pérez', '${c1}', '${i15}', 'alta') returning *`));
+ok(t1.creado_por_nombre === "Dueño" && !t1.hecha && t1.hecha_en === null, "admin crea tarea (queda pendiente, con autor)");
+ok((await nov(`titulo='Nueva tarea · Mango del colocador más largo'`)).length === 1, "nueva tarea -> novedad");
+await como(OP);
+ok((await db.query(`select * from tareas`)).rows.length === 1, "operario ve las tareas");
+await db.query(`update tareas set hecha=true where id='${t1.id}'`);
+await err(`insert into tareas (titulo) values ('x')`, "operario NO crea tareas");
+await como(ADMIN);
+ok((await q1(`select hecha from tareas where id='${t1.id}'`)).hecha === false, "operario NO marca tareas");
+const t1b = await q1(`update tareas set hecha=true where id='${t1.id}' returning *`);
+ok(t1b.hecha && t1b.hecha_en !== null && t1b.hecha_por_nombre === "Dueño", "admin marca corregida: guarda quién y cuándo");
+ok((await nov(`titulo='✓ Tarea corregida · Mango del colocador más largo'`)).length === 1, "tarea corregida -> novedad");
+const t1c = await q1(`update tareas set hecha=false where id='${t1.id}' returning *`);
+ok(!t1c.hecha && t1c.hecha_en === null && t1c.hecha_por_nombre === null, "desmarcar limpia quién y cuándo");
+await err(`update tareas set hecha_por_nombre='otro' where id='${t1.id}'`, "no se puede falsear quién la marcó");
+
 await db.exec(`reset role; select set_config('request.jwt.claim.sub','',false); set role anon;`);
+await err(`select * from novedades`, "anon no lee novedades");
+await err(`select * from tareas`, "anon no lee tareas");
 await err(`select * from cajas`, "anon no lee nada");
 await err(`select * from planos`, "anon no lee planos");
 await err(`select ajustar_stock('${s}','stock_terminado',1)`, "anon no ejecuta RPC");

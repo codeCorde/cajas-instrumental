@@ -40,13 +40,13 @@ En Windows, si PowerShell bloquea `npm`/`npx`, usar `npm.cmd` / `npx.cmd`.
 
 ## Mapa
 ```
-app/(app)/            páginas con sesión: resumen, cajas/[id], cargar, fabricar, historial, planos, admin/*
+app/(app)/            páginas con sesión: resumen, cajas/[id], cargar, fabricar, planos, tareas, novedades, historial, admin/*
 app/(app)/admin/acciones.ts   todas las Server Actions de administración
 app/auth/, app/login/ login, invitaciones, nueva contraseña
 lib/calculos.ts       ★ lógica de negocio      lib/armado.ts  ★ regla de armado (vista previa)
 lib/datos.ts          lecturas de Supabase     lib/planos.ts  utilidades de planos
 lib/supabase/         clientes (navegador, servidor, service role)
-supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos       supabase/seed.sql  datos de ejemplo
+supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos · 0005 novedades y tareas       supabase/seed.sql  datos de ejemplo
 scripts/              crear-admin, importar-cajas (planos), probar-sql
 ```
 Más contexto: `README.md` (instalación y funcionamiento) y `DECISIONES.md` (por qué se hizo cada cosa).
@@ -57,3 +57,5 @@ Más contexto: `README.md` (instalación y funcionamiento) y `DECISIONES.md` (po
   Ojo: la vista previa usa la **misma base de Supabase** que producción (los datos que se toquen ahí son reales).
 - El otro socio revisa y aprueba el PR antes de mergear.
 - Commits y PRs en español, cortos y descriptivos.
+- **Novedades**: los cambios de estructura se registran solos (triggers de 0005). Cuando Claude haga un cambio de la app
+  que el equipo deba conocer, sumar una fila con `origen = 'claude'` y `seccion = 'codigo'` en la migración del PR.
