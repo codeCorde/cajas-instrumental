@@ -20,6 +20,7 @@ app/
   (app)/planos/              Instrumental de cada caja con sus planos (visor PDF, descarga de DWG/STEP)
   (app)/tareas/              Tareas de mejora (aclaraciones de médicos) con check «corregido»
   (app)/novedades/           Registro de cambios: qué se modificó, cuándo y quién
+  (app)/chat/                Chat del equipo en tiempo real (todos los usuarios)
   (app)/historial/           Movimientos con filtros + CSV            [solo admin]
   (app)/admin/               Cajas, instrumentales, medidas/partes, notas, usuarios, QR   [solo admin]
 lib/
@@ -34,6 +35,7 @@ supabase/
   migrations/0003_rpc.sql    Funciones de stock: ajustar_stock, armar_caja, entregar_caja
   migrations/0004_planos.sql Tabla de planos + bucket privado «planos» en Storage
   migrations/0005_novedades_tareas.sql  Novedades (registro de cambios) y Tareas de mejora
+  migrations/0006_chat_equipo.sql       Chat del equipo (mensajes en tiempo real)
   seed.sql                   Datos de ejemplo
 tests/calculos.test.ts       Tests de lib/calculos.ts y lib/armado.ts
 scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres en memoria
@@ -50,7 +52,8 @@ scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres e
    3. `supabase/migrations/0003_rpc.sql`
    4. `supabase/migrations/0004_planos.sql`
    5. `supabase/migrations/0005_novedades_tareas.sql`
-   6. `supabase/seed.sql` (datos de ejemplo; se puede volver a correr, recrea las cajas 1, 2 y 3)
+   6. `supabase/migrations/0006_chat_equipo.sql`
+   7. `supabase/seed.sql` (datos de ejemplo; se puede volver a correr, recrea las cajas 1, 2 y 3)
 3. En **Authentication → Sign In / Providers → Email**: dejá habilitado Email. Si no querés que se registre cualquiera,
    desactivá **Allow new users to sign up** (los usuarios los crea el admin desde la app).
 4. En **Authentication → URL Configuration**:

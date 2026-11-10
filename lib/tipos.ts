@@ -162,3 +162,12 @@ export interface Tarea {
 
 export const PRIORIDAD_LABEL: Record<Prioridad, string> = { alta: "Alta", media: "Media", baja: "Baja" };
 export const PRIORIDAD_ORDEN: Record<Prioridad, number> = { alta: 0, media: 1, baja: 2 };
+
+// ---------------- Chat del equipo ----------------
+export interface Mensaje {
+  id: number;
+  creado_en: string;
+  autor_id: string | null;
+  autor_nombre: string | null;
+  texto: string;
+}
