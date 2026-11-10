@@ -31,6 +31,9 @@ export default async function AdminCajaPage({ params }: { params: Promise<{ id: 
         <Link href={`/cajas/${caja.id}`} className="ml-auto text-sm text-acento hover:underline">
           Ver detalle
         </Link>
+        <Link href={`/admin/qr?caja=${caja.id}`} className="text-sm text-acento hover:underline">
+          QR de carga
+        </Link>
       </div>
 
       <section className="card p-4 space-y-3">

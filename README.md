@@ -113,7 +113,8 @@ Todo usuario nuevo nace como **operario**; el rol solo lo cambia un admin.
 3. En **Environment Variables** cargá las 4 variables de la tabla de arriba
    (`NEXT_PUBLIC_SITE_URL` = la URL que te da Vercel, o tu dominio).
 4. **Deploy**. Después actualizá en Supabase la **Site URL** y las **Redirect URLs** con la URL final.
-5. Entrá como admin → **Administración → QR de carga** → imprimí el QR y pegalo en el taller.
+5. Entrá como admin → **Administración → QR de carga** → imprimí el QR general para el taller, el de cada caja y,
+   si querés, las etiquetas de cada instrumental (abren directo su + / −).
 
 ---
 
@@ -171,8 +172,7 @@ Solo cambian a través de las funciones RPC, que en la misma transacción regist
   de `0002_rls.sql`, al tipo en `lib/tipos.ts` y al formulario en `app/(app)/admin/instrumentales/[id]/page.tsx`.
 - **Nuevo motivo de movimiento** → `alter type motivo_movimiento add value '...'` y `MOTIVO_LABEL` en `lib/tipos.ts`.
 
-Preparado para más adelante (no implementado): QR por pieza o lote (la ruta `/cargar/[cajaId]` ya acepta ir directo
-a una caja; se puede sumar `?i=<instrumental>`), subida de archivos (hoy son links de Drive), importación desde Excel,
+Preparado para más adelante (no implementado): QR por lote, importación desde Excel,
 órdenes de producción, clientes y pedidos (la tabla `movimientos` ya tiene `motivo` y `nota` para enlazarlos).
 
 ---
