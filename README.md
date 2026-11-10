@@ -201,3 +201,14 @@ npm run dev
 
 Si el PR trae una migración nueva, el admin la corre en el SQL Editor de Supabase **antes** de mergear.
 La vista previa usa la misma base que producción: cuidado con los datos que se cargan ahí.
+
+### Claude en GitHub (tareas en 2do plano)
+Con `.github/workflows/claude.yml`, cualquiera del equipo puede escribir **@claude** en un issue o en un comentario de PR
+(ej.: «@claude agregá el campo cliente a la caja») y Claude trabaja solo en la nube: responde ahí mismo o deja una rama
+con los cambios para revisar. Solo responde a dueño, miembros y colaboradores del repo.
+
+Lo activa una vez el **admin del repo**:
+1. Instalar la app de Claude en este repo: <https://github.com/apps/claude>.
+2. En su compu, con Claude Code instalado, correr `claude setup-token` y copiar el token que muestra.
+3. En GitHub: **Settings → Secrets and variables → Actions → New repository secret**, nombre `CLAUDE_CODE_OAUTH_TOKEN`,
+   pegar el token. (Nunca pegarlo en código, issues ni PRs.)
