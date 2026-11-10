@@ -1,7 +1,7 @@
 "use client";
 // Paso 2 de la carga por QR: instrumentales de la caja con buscador y + / − grandes.
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { evaluarInstrumental } from "@/lib/calculos";
 import { useCaja } from "@/lib/useCaja";
 import type { CajaCompleta } from "@/lib/tipos";
@@ -16,10 +16,15 @@ const normalizar = (s: string) =>
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
 
-export default function CargaRapida({ inicial }: { inicial: CajaCompleta }) {
+export default function CargaRapida({ inicial, abiertoInicial = null }: { inicial: CajaCompleta; abiertoInicial?: string | null }) {
   const { caja, ajustar, armar, entregar, aviso, setAviso } = useCaja(inicial);
   const [busqueda, setBusqueda] = useState("");
-  const [abierto, setAbierto] = useState<string | null>(null);
+  const [abierto, setAbierto] = useState<string | null>(abiertoInicial);
+
+  // Si se llegó por el QR de un instrumental, lo lleva a la vista.
+  useEffect(() => {
+    if (abiertoInicial) document.getElementById(`fila-${abiertoInicial}`)?.scrollIntoView({ block: "start" });
+  }, [abiertoInicial]);
 
   const lista = useMemo(() => {
     const q = normalizar(busqueda.trim());
@@ -59,7 +64,7 @@ export default function CargaRapida({ inicial }: { inicial: CajaCompleta }) {
           const ev = evaluarInstrumental(i);
           const estaAbierto = abierto === i.id;
           return (
-            <li key={i.id} className={`card overflow-hidden ${estaAbierto ? "border-acento" : ""}`}>
+            <li key={i.id} id={`fila-${i.id}`} className={`card overflow-hidden scroll-mt-20 ${estaAbierto ? "border-acento" : ""}`}>
               <button
                 type="button"
                 className="w-full flex items-center gap-3 p-3 min-h-16 text-left"
