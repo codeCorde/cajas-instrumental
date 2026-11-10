@@ -1,6 +1,7 @@
 // Carga los instrumentales de las 3 cajas y sube sus planos a Supabase Storage.
 // Uso:  node scripts/importar-cajas.mjs "C:\Users\...\Recopilación cajas de cirugía"
 // Se puede correr de nuevo: no duplica instrumentales ni planos (los reemplaza).
+// Para importar una sola caja:  node scripts/importar-cajas.mjs "<carpeta>" 1
 import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
@@ -17,22 +18,21 @@ const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_
 
 const SIN_ROTULO = "Sin rótulo en el plano de la caja";
 // archivos: rutas relativas a la carpeta de la caja; si terminan en "/" se toma toda la subcarpeta.
-// existe: el instrumental ya estaba cargado (Caja 1): solo se le suman los planos.
 const CAJAS = [
   {
     numero: 1, nombre: "Caja Doble Movilidad", carpeta: "caja Doble movilidad",
     planosCaja: ["Probadores.dwg"],
     instrumentales: [
-      { codigo: "1.1", existe: true, alias: "Probador de cotilo", archivos: ["Probador de cotilo/"] },
-      { codigo: "1.2", existe: true, alias: "Impactor de cabeza (cúpula doble movilidad)", archivos: ["Impactor de cabeza/"] },
-      { codigo: "1.5", existe: true, alias: "Colocador de cúpula doble movilidad", archivos: ["Colocador/"] },
-      { codigo: "1.6", existe: true, alias: "Probador de liner para cúpula doble movilidad", archivos: ["Probador de liner/"] },
-      { codigo: "1.7", existe: true, archivos: ["Prensa/"] },
-      { codigo: "1.8", existe: true, alias: "Probador de componente cefálico Ø28 / Ø32", archivos: ["Probador de componente cefálico ¥28.pdf", "Probador de componente cefálico ¥32.pdf"] },
-      { codigo: "1.9", existe: true, archivos: ["Mango de fresa/"] },
-      { codigo: "1.10", existe: true, archivos: ["Fresas acetabulares/"] },
-      { codigo: "1.11", nombre: "Empujador", archivos: ["Empujador.pdf", "Empujador.dwg"] },
-      { codigo: "1.12", nombre: "Extractor de liner para cúpula doble movilidad", archivos: ["Extractor/"] },
+      { codigo: "1.1", nombre: "Colocador de cúpula doble movilidad", alias: "Incluye mango y modelo IP", archivos: ["Colocador/"] },
+      { codigo: "1.2", nombre: "Empujador", archivos: ["Empujador.pdf", "Empujador.dwg"] },
+      { codigo: "1.3", nombre: "Extractor de liner para cúpula doble movilidad", archivos: ["Extractor/"] },
+      { codigo: "1.4", nombre: "Fresas acetabulares", tipo: "medidas", medidas: ["Ø44", "Ø52"], archivos: ["Fresas acetabulares/"] },
+      { codigo: "1.5", nombre: "Impactor de cabeza", alias: "Para cúpula doble movilidad", archivos: ["Impactor de cabeza/"] },
+      { codigo: "1.6", nombre: "Mango de fresa", archivos: ["Mango de fresa/"] },
+      { codigo: "1.7", nombre: "Prensa", archivos: ["Prensa/"] },
+      { codigo: "1.8", nombre: "Probador de componente cefálico", tipo: "medidas", medidas: ["Ø28", "Ø32"], archivos: ["Probador de componente cefálico ¥28.pdf", "Probador de componente cefálico ¥32.pdf"] },
+      { codigo: "1.9", nombre: "Probador de cotilo", archivos: ["Probador de cotilo/"] },
+      { codigo: "1.10", nombre: "Probador de liner para cúpula doble movilidad", archivos: ["Probador de liner/"] },
     ],
   },
   {
@@ -114,11 +114,12 @@ async function subirPlano(caja, cajaNumero, instrumental, rel, orden) {
   process.stdout.write(".");
 }
 
-for (const c of CAJAS) {
+const SOLO = process.argv[3] ? Number(process.argv[3]) : null;
+for (const c of CAJAS.filter((x) => !SOLO || x.numero === SOLO)) {
   // Caja: crear o renombrar
   let { data: caja } = await sb.from("cajas").select("*").eq("numero", c.numero).maybeSingle();
   if (!caja) ({ data: caja } = await sb.from("cajas").insert({ numero: c.numero, nombre: c.nombre }).select().single());
-  else if (caja.nombre !== c.nombre) await sb.from("cajas").update({ nombre: c.nombre }).eq("id", caja.id);
+  else if (caja.nombre !== c.nombre || caja.ejemplo) await sb.from("cajas").update({ nombre: c.nombre, ejemplo: false }).eq("id", caja.id);
   caja.carpeta = c.carpeta;
   console.log(`\nCaja ${c.numero} · ${c.nombre}`);
 
@@ -126,7 +127,6 @@ for (const c of CAJAS) {
 
   for (const [idx, def] of c.instrumentales.entries()) {
     let { data: inst } = await sb.from("instrumentales").select("id, codigo, alias").eq("caja_id", caja.id).eq("codigo", def.codigo).maybeSingle();
-    if (!inst && def.existe) throw new Error(`Se esperaba el instrumental ${def.codigo} en la caja ${c.numero}`);
     if (!inst) {
       const { data, error } = await sb
         .from("instrumentales")
@@ -143,7 +143,7 @@ for (const c of CAJAS) {
     } else if (def.alias && !inst.alias) {
       await sb.from("instrumentales").update({ alias: def.alias }).eq("id", inst.id);
     }
-    process.stdout.write(`\n  ${def.codigo} ${def.nombre ?? "(existente)"} `);
+    process.stdout.write(`\n  ${def.codigo} ${def.nombre} `);
     for (const [o, rel] of expandir(c.carpeta, def.archivos).entries()) await subirPlano(caja, c.numero, inst, rel, o);
   }
 }
@@ -151,7 +151,7 @@ for (const c of CAJAS) {
 // ¿Quedó algún archivo sin asignar?
 const todos = [];
 const recorrer = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? recorrer(path.join(d, e.name)) : todos.push(path.normalize(path.join(d, e.name)))));
-recorrer(RAIZ);
+recorrer(SOLO ? path.join(RAIZ, CAJAS.find((x) => x.numero === SOLO).carpeta) : RAIZ);
 const sobrantes = todos.filter((f) => !usados.has(f));
 console.log(`\n\nListo: ${usados.size} de ${todos.length} archivos subidos.`);
 if (sobrantes.length) console.log("Sin asignar:\n  " + sobrantes.join("\n  "));
