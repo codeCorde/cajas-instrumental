@@ -14,6 +14,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/planos", label: "Planos" },
     { href: "/tareas", label: "Tareas" },
     { href: "/novedades", label: "Novedades" },
+    { href: "/chat", label: "Chat" },
     ...(esAdmin
       ? [
           { href: "/historial", label: "Historial" },

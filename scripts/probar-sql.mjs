@@ -27,7 +27,7 @@ create table storage.objects (id uuid primary key default gen_random_uuid(), buc
 alter table storage.objects enable row level security;
 grant usage on schema storage to authenticated; grant all on storage.objects to authenticated; grant select on storage.buckets to authenticated;
 `);
-for (const f of ["supabase/migrations/0001_tablas.sql", "supabase/migrations/0002_rls.sql", "supabase/migrations/0003_rpc.sql", "supabase/migrations/0004_planos.sql", "supabase/migrations/0005_novedades_tareas.sql", "supabase/seed.sql", "supabase/seed.sql"]) {
+for (const f of ["supabase/migrations/0001_tablas.sql", "supabase/migrations/0002_rls.sql", "supabase/migrations/0003_rpc.sql", "supabase/migrations/0004_planos.sql", "supabase/migrations/0005_novedades_tareas.sql", "supabase/migrations/0006_chat_equipo.sql", "supabase/seed.sql", "supabase/seed.sql"]) {
   await db.exec(leer(f)); console.log("ok   ", f);
 }
 const ADMIN = "00000000-0000-0000-0000-00000000000a", OP = "00000000-0000-0000-0000-00000000000b";
@@ -153,9 +153,33 @@ const t1c = await q1(`update tareas set hecha=false where id='${t1.id}' returnin
 ok(!t1c.hecha && t1c.hecha_en === null && t1c.hecha_por_nombre === null, "desmarcar limpia quién y cuándo");
 await err(`update tareas set hecha_por_nombre='otro' where id='${t1.id}'`, "no se puede falsear quién la marcó");
 
+// ---------- CHAT DEL EQUIPO ----------
+await como(OP);
+const m1 = await q1(`insert into mensajes (texto) values ('  Hola, ¿cargo la caja 2?  ') returning *`);
+ok(m1.autor_id === OP && m1.autor_nombre === "op" && m1.texto === "Hola, ¿cargo la caja 2?", "operario escribe en el chat (autor puesto por la base)");
+await err(`insert into mensajes (texto, autor_nombre) values ('x','Dueño')`, "no se puede falsear el autor del mensaje");
+await err(`insert into mensajes (texto) values ('   ')`, "no se mandan mensajes vacíos");
+await err(`update mensajes set texto='hack'`, "nadie edita mensajes");
+await como(ADMIN);
+const m2 = await q1(`insert into mensajes (texto) values ('Sí, dale') returning *`);
+ok(m2.autor_nombre === "Dueño", "admin escribe con su nombre");
+ok((await db.query(`select * from mensajes`)).rows.length === 2, "admin ve todos los mensajes");
+await como(OP);
+await db.query(`delete from mensajes where id=${m2.id}`);
+ok((await db.query(`select * from mensajes`)).rows.length === 2, "operario NO borra mensajes ajenos");
+await db.query(`delete from mensajes where id=${m1.id}`);
+ok((await db.query(`select * from mensajes`)).rows.length === 1, "cada uno borra los suyos");
+await como(ADMIN);
+await db.query(`delete from mensajes where id=${m2.id}`);
+ok((await db.query(`select * from mensajes`)).rows.length === 0, "admin borra cualquier mensaje");
+await db.exec(`reset role; select set_config('request.jwt.claim.sub','',false);`);
+ok((await q1(`insert into mensajes (texto) values ('Listo el PR') returning *`)).autor_nombre === "Claude", "sin sesión (SQL Editor) firma Claude");
+ok((await nov(`titulo='Nueva sección: Chat del equipo'`)).length === 1, "la migración deja su novedad");
+
 await db.exec(`reset role; select set_config('request.jwt.claim.sub','',false); set role anon;`);
 await err(`select * from novedades`, "anon no lee novedades");
 await err(`select * from tareas`, "anon no lee tareas");
+await err(`select * from mensajes`, "anon no lee el chat");
 await err(`select * from cajas`, "anon no lee nada");
 await err(`select * from planos`, "anon no lee planos");
 await err(`select ajustar_stock('${s}','stock_terminado',1)`, "anon no ejecuta RPC");
