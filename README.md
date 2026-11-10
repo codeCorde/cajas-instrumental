@@ -64,6 +64,8 @@ scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres e
    {{ .SiteURL }}/auth/confirmar?token_hash={{ .TokenHash }}&type=invite&next=/auth/nueva-clave
    ```
    Con la plantilla por defecto también funciona, pero esta es más robusta.
+   «¿Olvidaste tu contraseña?» (`/auth/recuperar`) funciona con la plantilla por defecto de **Reset password**:
+   el link vuelve a `/auth/nueva-clave` y sirve aunque se abra en otro dispositivo. No hace falta tocarla.
 6. En **Project Settings → API** copiá la **URL**, la **anon key** y la **service_role key**.
 
 > Nota: el SMTP de prueba de Supabase manda pocos emails por hora. Para el día a día podés usar

@@ -4,7 +4,7 @@ import { crearClienteServidor } from "@/lib/supabase/server";
 import { destinoSeguro } from "@/lib/rutas";
 
 /**
- * Link del email de invitación (ver README → plantilla "Invite user"):
+ * Link del email de invitación si se usa la plantilla personalizada (ver README → "Invite user"):
  *   {{ .SiteURL }}/auth/confirmar?token_hash={{ .TokenHash }}&type=invite&next=/auth/nueva-clave
  */
 export async function GET(request: NextRequest) {

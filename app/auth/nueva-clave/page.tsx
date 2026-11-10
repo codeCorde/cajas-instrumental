@@ -18,7 +18,7 @@ export default function NuevaClavePage() {
       crearClienteNavegador()
         .auth.setSession({ access_token, refresh_token })
         .then(({ error }) => {
-          if (error) setError("El link venció. Pedile al admin una invitación nueva.");
+          if (error) setError("El link venció. Pedí uno nuevo desde «¿Olvidaste tu contraseña?» en la pantalla de ingreso.");
           history.replaceState(null, "", window.location.pathname);
         });
     }

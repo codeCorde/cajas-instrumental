@@ -1,11 +1,12 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { crearClienteNavegador } from "@/lib/supabase/client";
 import { destinoSeguro } from "@/lib/rutas";
 
 const ERRORES: Record<string, string> = {
-  link: "El link venció o ya se usó. Pedile al admin una invitación nueva.",
+  link: "El link venció o ya se usó. Pedí uno nuevo con «¿Olvidaste tu contraseña?».",
   perfil: "Tu usuario no tiene perfil. Avisale al admin.",
 };
 
@@ -44,6 +45,9 @@ export default function FormLogin() {
       </label>
       {error && <p role="alert" className="text-sm text-falta">{error}</p>}
       <button className="btn btn-primario w-full" disabled={enviando}>{enviando ? "Ingresando…" : "Ingresar"}</button>
+      <Link href="/auth/recuperar" className="block text-center text-sm text-acento hover:underline">
+        ¿Olvidaste tu contraseña?
+      </Link>
     </form>
   );
 }
