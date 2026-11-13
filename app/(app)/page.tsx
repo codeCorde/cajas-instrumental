@@ -1,152 +1,74 @@
 import Link from "next/link";
-import { listarCajasCompletas } from "@/lib/datos";
-import { ESTADO_CAJA_INFO, evaluarInstrumental, resumenCaja } from "@/lib/calculos";
-import { EstadoChip, EtiquetaEjemplo, MedidorCaja } from "@/components/Estado";
-import { crearClienteServidor } from "@/lib/supabase/server";
-import { formatearFecha } from "@/lib/historial";
+import { cargarCatalogo, resumenDe } from "@/lib/datos";
+import { Cifra, EstadoChip, MedidorCaja } from "@/components/Estado";
+import FormAccion from "@/components/FormAccion";
+import { crearCaja } from "./cajas/acciones";
 
-export const dynamic = "force-dynamic";
-
-export default async function ResumenPage() {
-  const supabase = await crearClienteServidor();
-  const [cajas, { count: tareasPendientes }, { data: ultimas }] = await Promise.all([
-    listarCajasCompletas(),
-    supabase.from("tareas").select("id", { count: "exact", head: true }).eq("hecha", false),
-    supabase.from("novedades").select("titulo, creado_en, autor_nombre").order("creado_en", { ascending: false }).limit(1),
-  ]);
-  const ultima = ultimas?.[0] as { titulo: string; creado_en: string; autor_nombre: string | null } | undefined;
-  const filas = cajas.map((c) => ({
-    caja: c,
-    r: resumenCaja(c.instrumentales),
-    estados: c.instrumentales.map((i) => ({ codigo: i.codigo, estado: evaluarInstrumental(i).estado })),
-  }));
+export default async function ConteoPage() {
+  const cat = await cargarCatalogo();
+  const filas = cat.cajas.map((caja) => ({ caja, r: resumenDe(cat, caja) }));
 
   return (
     <div className="space-y-5">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <p className="font-mono text-xs uppercase tracking-widest text-tenue">Resumen de producción</p>
-          <h1 className="titulo text-4xl">Cajas</h1>
-        </div>
-        <Link href="/cargar" className="btn btn-primario">
-          Cargar stock
-        </Link>
+      <div>
+        <p className="font-mono text-xs uppercase tracking-widest text-tenue">Resumen</p>
+        <h1 className="titulo text-4xl">Conteo de cajas</h1>
+        <p className="text-sm text-tenue mt-1 max-w-3xl">
+          Cuántas cajas hay armadas y cuántas se pueden armar con el instrumental que hay. Como varias cajas comparten instrumental,
+          cada número se calcula por separado: <strong>no se suman</strong>.
+        </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Link href="/tareas" className="card p-4 flex items-center gap-4 hover:border-acento">
-          <span className={`font-mono text-3xl font-semibold ${tareasPendientes ? "text-proceso" : "text-disponible"}`}>
-            {tareasPendientes ?? 0}
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="block font-semibold">Tareas de mejora pendientes</span>
-            <span className="block text-xs text-tenue">
-              {tareasPendientes ? "Aclaraciones de médicos sin corregir" : "✓ Todo corregido"}
-            </span>
-          </span>
-          <span aria-hidden="true" className="text-xl text-tenue">›</span>
-        </Link>
-        <Link href="/novedades" className="card p-4 flex items-center gap-4 hover:border-acento">
-          <span className="flex-1 min-w-0">
-            <span className="block text-[11px] uppercase tracking-wider text-tenue">Última novedad</span>
-            <span className="block font-semibold truncate">{ultima?.titulo ?? "Sin novedades todavía"}</span>
-            {ultima && (
-              <span className="block text-xs text-tenue">
-                {ultima.autor_nombre ?? "—"} · {formatearFecha(ultima.creado_en)}
-              </span>
+      <div className="grid gap-4 lg:grid-cols-3">
+        {filas.map(({ caja, r }) => (
+          <Link key={caja.id} href={`/cajas/${caja.codigo}`} className="card p-4 space-y-4 hover:border-acento focus-visible:border-acento block">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-xs text-tenue">{caja.codigo}</p>
+                <h2 className="titulo text-2xl">{caja.nombre}</h2>
+              </div>
+              <span className="text-sm text-tenue">{r.filas.length} instrumentales</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Cifra valor={caja.cajas_armadas} label="Armadas en stock" />
+              <Cifra valor={r.posibles} label="Se pueden armar" clase={r.posibles > 0 ? "text-disponible" : "text-falta"} />
+            </div>
+            <MedidorCaja estados={r.filas.map((f) => ({ id: f.inst.id, nombre: f.inst.nombre, estado: f.estado }))} />
+            <div className="flex flex-wrap gap-1.5">
+              <EstadoChip estado="disponible" label={`${r.contadores.disponible} disponibles`} chico />
+              <EstadoChip estado="en_proceso" label={`${r.contadores.en_proceso} en proceso`} chico />
+              <EstadoChip estado="falta" label={`${r.contadores.falta} faltan`} chico />
+              {r.contadores.sin_definir > 0 && <EstadoChip estado="sin_definir" label={`${r.contadores.sin_definir} sin definir`} chico />}
+            </div>
+            {r.limitante && r.posibles === 0 && (
+              <p className="text-xs text-tenue">
+                Limita: <strong className="text-texto">{r.limitante.inst.nombre}</strong>
+                {r.limitante.falta ? ` · ${r.limitante.falta}` : ""}
+              </p>
             )}
-          </span>
-          <span aria-hidden="true" className="text-xl text-tenue">›</span>
-        </Link>
+          </Link>
+        ))}
       </div>
 
-      {filas.length === 0 && <p className="card p-6 text-tenue">Todavía no hay cajas. El admin las crea desde Administración.</p>}
+      {filas.length === 0 && <p className="card p-6 text-tenue">Todavía no hay cajas. Agregá la primera acá abajo.</p>}
 
-      {/* Celular: tarjetas */}
-      <ul className="grid gap-3 md:hidden">
-        {filas.map(({ caja, r, estados }) => (
-          <li key={caja.id}>
-            <Link href={`/cajas/${caja.id}`} className="card block p-4 space-y-3 hover:border-acento">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-mono text-xs text-tenue">CAJA {caja.numero}</p>
-                  <p className="titulo text-2xl">{caja.nombre}</p>
-                </div>
-                {caja.ejemplo && <EtiquetaEjemplo />}
-              </div>
-              <MedidorCaja estados={estados} />
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <Dato label="Se pueden armar" valor={r.cajasCompletas} fuerte />
-                <Dato label="Armadas en stock" valor={caja.cajas_armadas} fuerte />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                <EstadoChip chico estado={ESTADO_CAJA_INFO[r.estado].estado} label={ESTADO_CAJA_INFO[r.estado].label} />
-                <span className="text-xs text-tenue self-center">
-                  {r.total} instr. · {r.disponibles} disp. · {r.enProceso} en proceso · {r.faltan} faltan
-                  {r.sinPartes ? ` · ${r.sinPartes} sin partes` : ""}
-                </span>
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-
-      {/* PC: tabla */}
-      {filas.length > 0 && (
-        <div className="card hidden md:block overflow-x-auto">
-          <table className="tabla">
-            <thead>
-              <tr>
-                <th>N°</th>
-                <th>Caja</th>
-                <th>Estado</th>
-                <th className="text-right">Cajas completas que se pueden armar</th>
-                <th className="text-right">Cajas armadas en stock</th>
-                <th className="text-right">Instrumentales</th>
-                <th className="text-right">Disponibles</th>
-                <th className="text-right">En proceso</th>
-                <th className="text-right">Faltan</th>
-                <th className="text-right">Sin partes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filas.map(({ caja, r, estados }) => (
-                <tr key={caja.id} className="hover:bg-superficie-2">
-                  <td className="font-mono">{caja.numero}</td>
-                  <td>
-                    <Link href={`/cajas/${caja.id}`} className="font-semibold hover:underline">
-                      {caja.nombre}
-                    </Link>{" "}
-                    {caja.ejemplo && <EtiquetaEjemplo />}
-                    <div className="mt-2 w-48">
-                      <MedidorCaja estados={estados} />
-                    </div>
-                  </td>
-                  <td>
-                    <EstadoChip chico estado={ESTADO_CAJA_INFO[r.estado].estado} label={ESTADO_CAJA_INFO[r.estado].label} />
-                  </td>
-                  <td className="text-right font-mono text-2xl font-semibold">{r.cajasCompletas}</td>
-                  <td className="text-right font-mono text-2xl font-semibold">{caja.cajas_armadas}</td>
-                  <td className="text-right font-mono">{r.total}</td>
-                  <td className="text-right font-mono text-disponible">{r.disponibles}</td>
-                  <td className="text-right font-mono text-proceso">{r.enProceso}</td>
-                  <td className="text-right font-mono text-falta">{r.faltan}</td>
-                  <td className="text-right font-mono text-sin">{r.sinPartes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Dato({ label, valor, fuerte }: { label: string; valor: number; fuerte?: boolean }) {
-  return (
-    <div className="rounded bg-superficie-2 p-2">
-      <p className="text-[11px] uppercase tracking-wider text-tenue">{label}</p>
-      <p className={`font-mono ${fuerte ? "text-3xl font-semibold" : ""}`}>{valor}</p>
+      <details className="card p-4 max-w-xl">
+        <summary className="cursor-pointer font-semibold">+ Agregar una caja</summary>
+        <FormAccion accion={crearCaja} className="mt-4 grid gap-3 sm:grid-cols-[8rem_1fr]" textoBoton="Crear caja" ok="Caja creada">
+          <label>
+            <span className="etiqueta">Código</span>
+            <input name="codigo" className="campo font-mono uppercase" required maxLength={12} pattern="[A-Za-z0-9-]+" placeholder="DM" />
+          </label>
+          <label>
+            <span className="etiqueta">Nombre</span>
+            <input name="nombre" className="campo" required placeholder="Caja Doble Movilidad" />
+          </label>
+          <label className="sm:col-span-2">
+            <span className="etiqueta">Descripción (opcional)</span>
+            <input name="descripcion" className="campo" />
+          </label>
+        </FormAccion>
+      </details>
     </div>
   );
 }

@@ -17,7 +17,4 @@ export function qrSvg(url: string): Promise<string> {
   return QRCode.toString(url, { type: "svg", margin: 1, errorCorrectionLevel: "M", color: { dark: "#000000", light: "#ffffff" } });
 }
 
-// Rutas de destino de cada tipo de QR
-export const rutaCargaGeneral = () => "/cargar";
-export const rutaCargaCaja = (cajaId: string) => `/cargar/${cajaId}`;
-export const rutaCargaInstrumental = (cajaId: string, instrumentalId: string) => `/cargar/${cajaId}?i=${instrumentalId}`;
+export const rutaTaller = (codigoCaja: string) => `/taller/${codigoCaja}`;

@@ -1,109 +1,83 @@
-import { ordenarPlanos, type Plano } from "./planos";
-import { crearClienteServidor } from "./supabase/server";
-import type { Caja, CajaCompleta, Instrumental } from "./tipos";
+import "server-only";
+import { cache } from "react";
+import { db, sinError } from "./db";
+import { resumenCaja } from "./calculos";
+import type { Apariencia, Archivo, Caja, Componente, Composicion, EntidadArchivo, Instrumental, Persona } from "./tipos";
 
-const SELECT_INSTR = "*, partes(*)";
+const ordenarComps = (c: Componente[]) => [...c].sort((a, b) => a.orden - b.orden || a.codigo_o_medida.localeCompare(b.codigo_o_medida, "es", { numeric: true }));
 
-function ordenar(instrumentales: Instrumental[]): Instrumental[] {
-  return [...instrumentales]
-    .sort((a, b) => a.orden - b.orden || a.codigo.localeCompare(b.codigo, "es", { numeric: true }))
-    .map((i) => ({ ...i, partes: [...(i.partes ?? [])].sort((a, b) => a.orden - b.orden) }));
+export interface Catalogo {
+  cajas: Caja[];
+  instrumentales: Instrumental[];
+  composicion: Composicion[];
+  porId: Map<string, Instrumental>;
 }
 
-export async function listarCajas(soloActivas = true): Promise<Caja[]> {
-  const supabase = await crearClienteServidor();
-  let q = supabase.from("cajas").select("*").order("numero");
-  if (soloActivas) q = q.eq("activa", true);
-  const { data, error } = await q;
-  if (error) throw error;
-  return data as Caja[];
-}
-
-export async function listarCajasCompletas(soloActivas = true): Promise<CajaCompleta[]> {
-  const supabase = await crearClienteServidor();
-  let q = supabase.from("cajas").select(`*, instrumentales(${SELECT_INSTR})`).order("numero");
-  if (soloActivas) q = q.eq("activa", true);
-  const { data, error } = await q;
-  if (error) throw error;
-  return (data as CajaCompleta[]).map((c) => ({ ...c, instrumentales: ordenar(c.instrumentales ?? []) }));
-}
-
-export async function obtenerCaja(id: string, conNotas = false): Promise<CajaCompleta | null> {
-  const supabase = await crearClienteServidor();
-  const sel = conNotas ? `*, instrumentales(*, partes(*), notas(*))` : `*, instrumentales(${SELECT_INSTR})`;
-  const { data, error } = await supabase.from("cajas").select(sel).eq("id", id).maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const caja = data as unknown as CajaCompleta;
-  return { ...caja, instrumentales: ordenar(caja.instrumentales ?? []) };
-}
-
-export async function obtenerInstrumental(id: string): Promise<(Instrumental & { caja: { id: string; numero: number; nombre: string } }) | null> {
-  const supabase = await crearClienteServidor();
-  const { data, error } = await supabase
-    .from("instrumentales")
-    .select("*, partes(*), notas(*), caja:cajas(id, numero, nombre)")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  const i = data as unknown as Instrumental & { caja: { id: string; numero: number; nombre: string } };
+/** Todo el catálogo (es chico: decenas de instrumentales). Se cachea por pedido. */
+export const cargarCatalogo = cache(async (): Promise<Catalogo> => {
+  const [cajas, inst, comp] = await Promise.all([
+    db().from("cajas").select("*").eq("activa", true).order("orden").order("nombre"),
+    db().from("instrumentales").select("*, componentes(*)").order("orden").order("codigo"),
+    db().from("composicion_caja").select("*").order("orden"),
+  ]);
+  const instrumentales = (sinError(inst) as Instrumental[]).map((i) => ({ ...i, componentes: ordenarComps(i.componentes ?? []) }));
   return {
-    ...i,
-    partes: [...(i.partes ?? [])].sort((a, b) => a.orden - b.orden),
-    notas: [...(i.notas ?? [])].sort((a, b) => b.creado_en.localeCompare(a.creado_en)),
+    cajas: sinError(cajas) as Caja[],
+    instrumentales,
+    composicion: sinError(comp) as Composicion[],
+    porId: new Map(instrumentales.map((i) => [i.id, i])),
   };
+});
+
+/** Instrumental de una caja, en orden, con su cantidad por caja. */
+export function composicionDe(cat: Catalogo, cajaId: string) {
+  return cat.composicion
+    .filter((c) => c.caja_id === cajaId && cat.porId.has(c.instrumental_id))
+    .map((c) => ({ inst: cat.porId.get(c.instrumental_id)!, cantPorCaja: c.cant_por_caja, orden: c.orden }));
 }
 
-// ---------------- Planos ----------------
-
-export interface InstrumentalIndice {
-  id: string;
-  codigo: string;
-  nombre: string;
-  alias: string | null;
-  orden: number;
-  planos: Plano[];
-}
-export interface CajaIndice {
-  id: string;
-  numero: number;
-  nombre: string;
-  planosCaja: Plano[];
-  instrumentales: InstrumentalIndice[];
+/** En qué cajas se usa un instrumental y cuántos lleva cada una. */
+export function usosDe(cat: Catalogo, instrumentalId: string) {
+  return cat.composicion
+    .filter((c) => c.instrumental_id === instrumentalId)
+    .map((c) => ({ caja: cat.cajas.find((k) => k.id === c.caja_id)!, cantPorCaja: c.cant_por_caja }))
+    .filter((u) => u.caja);
 }
 
-/** Todas las cajas activas con sus instrumentales y planos (para el índice de planos). */
-export async function listarIndicePlanos(): Promise<CajaIndice[]> {
-  const supabase = await crearClienteServidor();
-  const { data, error } = await supabase
-    .from("cajas")
-    .select("id, numero, nombre, instrumentales(id, codigo, nombre, alias, orden), planos(*)")
-    .eq("activa", true)
-    .order("numero");
-  if (error) throw error;
-  type Fila = { id: string; numero: number; nombre: string; instrumentales: Omit<InstrumentalIndice, "planos">[]; planos: Plano[] };
-  return (data as unknown as Fila[]).map((c) => ({
-    id: c.id,
-    numero: c.numero,
-    nombre: c.nombre,
-    planosCaja: ordenarPlanos(c.planos.filter((p) => !p.instrumental_id)),
-    instrumentales: [...c.instrumentales]
-      .sort((a, b) => a.orden - b.orden || a.codigo.localeCompare(b.codigo, "es", { numeric: true }))
-      .map((i) => ({ ...i, planos: ordenarPlanos(c.planos.filter((p) => p.instrumental_id === i.id)) })),
-  }));
+export function resumenDe(cat: Catalogo, caja: Caja) {
+  return resumenCaja(composicionDe(cat, caja.id));
 }
 
-export async function listarPlanosInstrumental(instrumentalId: string): Promise<Plano[]> {
-  const supabase = await crearClienteServidor();
-  const { data, error } = await supabase.from("planos").select("*").eq("instrumental_id", instrumentalId);
-  if (error) throw error;
-  return ordenarPlanos(data as Plano[]);
+export async function cajaPorCodigo(codigo: string): Promise<Caja | null> {
+  const cat = await cargarCatalogo();
+  return cat.cajas.find((c) => c.codigo.toLowerCase() === codigo.toLowerCase()) ?? null;
 }
 
-export async function listarPlanosCaja(cajaId: string): Promise<Plano[]> {
-  const supabase = await crearClienteServidor();
-  const { data, error } = await supabase.from("planos").select("*").eq("caja_id", cajaId).is("instrumental_id", null);
-  if (error) throw error;
-  return ordenarPlanos(data as Plano[]);
+export async function archivosDe(entidad: EntidadArchivo, ids: string[]): Promise<Archivo[]> {
+  if (ids.length === 0) return [];
+  const r = await db().from("archivos").select("*").eq("entidad", entidad).in("entidad_id", ids).order("vigente", { ascending: false }).order("creado_en", { ascending: false });
+  return sinError(r) as Archivo[];
+}
+
+export const APARIENCIA_POR_DEFECTO: Apariencia = { empresa: "Cajas de Instrumental", color: "#1d4f7c", logo_path: null, modo: "auto" };
+
+export const leerApariencia = cache(async (): Promise<Apariencia> => {
+  const { data } = await db().from("config").select("valor").eq("clave", "apariencia").maybeSingle();
+  return { ...APARIENCIA_POR_DEFECTO, ...((data?.valor as Partial<Apariencia>) ?? {}) };
+});
+
+export async function leerConfig<T>(clave: string, porDefecto: T): Promise<T> {
+  const { data } = await db().from("config").select("valor").eq("clave", clave).maybeSingle();
+  return (data?.valor as T) ?? porDefecto;
+}
+
+export async function listarPersonas(incluirInactivas = false): Promise<Persona[]> {
+  let q = db().from("personas").select("*").order("nombre");
+  if (!incluirInactivas) q = q.eq("activa", true);
+  return sinError(await q) as Persona[];
+}
+
+/** Registra un cambio de estructura en Novedades (no los de stock: esos quedan en el historial). */
+export async function registrarNovedad(autor: string, seccion: string, titulo: string, detalle?: string | null) {
+  await db().from("novedades").insert({ autor, origen: "app", seccion, titulo, detalle: detalle ?? null });
 }
