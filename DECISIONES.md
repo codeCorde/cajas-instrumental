@@ -40,3 +40,29 @@
     o era equivalente (Probador de cotilo → 1.1 Probador de cúpula, Impactor de cabeza → 1.2 Mango impactor,
     Colocador → 1.5, Probador de liner → 1.6 Liner DM, Probador cefálico → 1.8 Cabeza de prueba); el nombre del plano
     quedó como alias. Los DWG de la caja completa quedaron como «Plano de la caja».
+
+---
+
+## App nueva (esquema `taller`, migraciones 0007–0008)
+
+1. **Esquema aparte.** La app nueva vive en el esquema `taller` de la misma base; `public` (0001–0006) quedó intacto para
+   que la versión anterior siguiera andando hasta publicar. Se puede borrar más adelante con una migración.
+2. **Sin Supabase Auth.** Contraseña única (bcrypt, guardada en base64 porque los `$` se rompen en los `.env`) + nombre
+   elegido, en una cookie firmada con `jose` por 30 días. No hay roles: cualquiera con la contraseña puede todo.
+3. **Base cerrada.** Las tablas de `taller` no tienen permisos para `anon`/`authenticated`; el servidor usa la service_role.
+   Por eso el chat se actualiza preguntando cada 4 s (no hay Realtime desde el navegador) y los archivos se suben con
+   links firmados de Storage.
+4. **Catálogo inicial** (0008): el del pedido, con stock en 0, `cant_por_caja = 1` y «A confirmar». Códigos: `COM-xx`
+   compartidos, `DM-xx`, `TRI-xx`, `CHM-xx`. Las cajas conservan sus id (los QR viejos de `/cargar/<id>` ya no existen:
+   hay que imprimir los nuevos de `/taller/<código>`).
+5. **Planos de la app anterior:** los 100 archivos quedaron vinculados a su instrumental nuevo sin volver a subirlos.
+   El «Impactor de cabeza (cúpula doble movilidad)» no figura en el listado de la caja DM: quedó en «Sin clasificar».
+   El PDF del mango del colocador fue a «Mango para colocador de cúpula».
+6. **Medidas y piezas a confirmar:** Colocador, Probador de cotilo y Fresas con Ø44–Ø62 de a 2; Probador de liner y Raspas
+   tricónicas sin medidas (quedan «Sin definir» hasta cargarlas).
+7. **Desarmar caja** devuelve los complejos como **unidades armadas** (no se desarman en piezas).
+8. **Stock que no baja de 0:** un − mayor que el stock deja 0 y el historial registra lo que realmente bajó.
+9. **Foto** del instrumental y de la caja = la primera imagen vigente de sus archivos (no hay un campo aparte).
+10. **Procesos con formato básico** se escriben como texto con marcas simples (`## título`, `1. paso`, `- viñeta`, `**negrita**`)
+    y se muestran armados; nunca se guarda HTML.
+11. **Fuera de alcance (preparado):** usuarios con permisos, visor 3D/DWG, QR por pieza, CNC, importación de Excel, clientes y facturación.

@@ -1,148 +1,213 @@
-import type { Tipo } from "./calculos";
+// Tipos de las tablas del esquema "taller".
 
-export type Rol = "admin" | "operario";
-export type Origen = "propio" | "tercerizado";
-export type Motivo = "carga" | "correccion" | "armado_caja" | "entrega";
-export type CampoStock = "stock_terminado" | "unidades_armadas" | "stock_parte";
-
-export interface Perfil {
-  id: string;
-  nombre: string;
-  email: string | null;
-  rol: Rol;
-}
+export type TipoInstrumental = "simple" | "medidas" | "complejo";
+export type ClaseComponente = "medida" | "pieza";
+export type Origen = "propia" | "tercerizado";
 
 export interface Caja {
   id: string;
-  numero: number;
+  codigo: string;
   nombre: string;
-  foto_url: string | null;
+  descripcion: string | null;
+  foto_path: string | null;
   cajas_armadas: number;
+  orden: number;
   activa: boolean;
-  ejemplo: boolean;
 }
 
-export interface Parte {
+export interface Componente {
   id: string;
   instrumental_id: string;
+  clase: ClaseComponente;
   codigo_o_medida: string;
   nombre: string | null;
   cant_por_unidad: number;
   stock: number;
-  nota: string | null;
+  descripcion: string | null;
+  proceso: string | null;
   orden: number;
-  ejemplo: boolean;
-}
-
-export interface Nota {
-  id: string;
-  instrumental_id: string;
-  tipo: string;
-  texto: string;
-  creado_en: string;
 }
 
 export interface Instrumental {
   id: string;
-  caja_id: string;
   codigo: string;
   nombre: string;
   alias: string | null;
-  tipo: Tipo;
-  cant_por_caja: number;
+  tipo: TipoInstrumental;
   stock_terminado: number;
   unidades_armadas: number;
   material: string | null;
   terminacion: string | null;
-  barra: string | null;
   origen: Origen;
   proveedor: string | null;
-  foto_url: string | null;
-  link_2d: string | null;
-  link_3d: string | null;
-  link_cnc: string | null;
-  link_fotos: string | null;
+  foto_path: string | null;
+  descripcion: string | null;
+  proceso: string | null;
+  a_confirmar: boolean;
   orden: number;
-  ejemplo: boolean;
-  partes: Parte[];
-  notas?: Nota[];
+  componentes: Componente[];
 }
 
-export interface CajaCompleta extends Caja {
-  instrumentales: Instrumental[];
+export interface Composicion {
+  caja_id: string;
+  instrumental_id: string;
+  cant_por_caja: number;
+  orden: number;
 }
 
+export type EntidadArchivo = "instrumental" | "componente" | "caja" | "calidad" | "sin_clasificar";
+export interface Archivo {
+  id: string;
+  entidad: EntidadArchivo;
+  entidad_id: string;
+  nombre: string;
+  tipo: string;
+  tamano: number;
+  storage_path: string;
+  vigente: boolean;
+  subido_por: string | null;
+  creado_en: string;
+}
+
+export const TIPOS_NOTA = ["General", "Herramienta", "Medición", "Proceso", "Proveedor"] as const;
+export type TipoNota = (typeof TIPOS_NOTA)[number];
+export interface Nota {
+  id: string;
+  instrumental_id: string;
+  componente_id: string | null;
+  tipo: TipoNota;
+  texto: string;
+  autor: string | null;
+  creado_en: string;
+}
+
+export type Motivo = "carga" | "correccion" | "armado_instrumental" | "armado_caja" | "desarmado" | "entrega";
+export const MOTIVO_LABEL: Record<Motivo, string> = {
+  carga: "Carga",
+  correccion: "Corrección",
+  armado_instrumental: "Armado de instrumental",
+  armado_caja: "Armado de caja",
+  desarmado: "Desarmado",
+  entrega: "Entrega",
+};
+export type CampoStock = "stock_terminado" | "unidades_armadas" | "stock" | "cajas_armadas";
+export const CAMPO_LABEL: Record<CampoStock, string> = {
+  stock_terminado: "Stock terminado",
+  unidades_armadas: "Unidades armadas",
+  stock: "Medida / pieza",
+  cajas_armadas: "Cajas armadas",
+};
 export interface Movimiento {
   id: number;
   creado_en: string;
-  usuario_nombre: string | null;
+  autor: string;
   caja_id: string | null;
+  instrumental_id: string | null;
+  componente_id: string | null;
   caja_nombre: string | null;
   instrumental_nombre: string | null;
-  parte_nombre: string | null;
-  campo: string;
+  componente_nombre: string | null;
+  campo: CampoStock;
   delta: number;
   stock_resultante: number;
   motivo: Motivo;
   nota: string | null;
 }
 
-export const MOTIVO_LABEL: Record<Motivo, string> = {
-  carga: "Carga",
-  correccion: "Corrección",
-  armado_caja: "Armado de caja",
-  entrega: "Entrega",
+export type EstadoPedido = "pendiente" | "en_produccion" | "listo" | "entregado" | "cancelado";
+export const ESTADO_PEDIDO_LABEL: Record<EstadoPedido, string> = {
+  pendiente: "Pendiente",
+  en_produccion: "En producción",
+  listo: "Listo",
+  entregado: "Entregado",
+  cancelado: "Cancelado",
 };
-
-export const CAMPO_LABEL: Record<string, string> = {
-  stock_terminado: "Stock terminado",
-  unidades_armadas: "Unidades armadas",
-  stock_parte: "Stock medida/parte",
-  cajas_armadas: "Cajas armadas",
-};
-
-export const TIPO_LABEL: Record<Tipo, string> = {
-  simple: "Simple",
-  medidas: "Medidas",
-  complejo: "Complejo",
-};
-
-export const TIPOS_NOTA = ["General", "Herramienta", "Medición", "Proceso", "Calidad", "Proveedor"];
-
-// ---------------- Novedades (registro de cambios) ----------------
-export type OrigenNovedad = "app" | "manual" | "claude" | "sistema";
-
-export interface Novedad {
-  id: number;
-  creado_en: string;
-  autor_nombre: string | null;
-  origen: OrigenNovedad;
-  seccion: string;
-  titulo: string;
-  detalle: string | null;
+export interface PedidoItem {
+  id: string;
+  pedido_id: string;
+  caja_id: string;
+  cantidad: number;
+}
+export interface Pedido {
+  id: string;
+  numero: string;
+  cliente: string;
+  fecha_pedido: string;
+  fecha_compromiso: string | null;
+  estado: EstadoPedido;
+  notas: string | null;
+  entregado_en: string | null;
+  items: PedidoItem[];
 }
 
-export const ORIGEN_NOVEDAD_LABEL: Record<OrigenNovedad, string> = {
-  app: "Automática",
-  manual: "Nota",
-  claude: "Claude",
-  sistema: "Versión",
+export type Resultado = "conforme" | "observaciones" | "no_conforme";
+export const RESULTADO_LABEL: Record<Resultado, string> = {
+  conforme: "Conforme",
+  observaciones: "Conforme con observaciones",
+  no_conforme: "No conforme",
 };
+export type EntidadInspeccion = "instrumental" | "componente" | "caja" | "pedido";
+export interface ItemChecklist {
+  item: string;
+  ok: boolean;
+}
+export interface MedidaControlada {
+  cota: string;
+  nominal: string;
+  tolerancia: string;
+  medido: string;
+  ok: boolean;
+}
+export interface Inspeccion {
+  id: string;
+  fecha: string;
+  inspector: string;
+  entidad: EntidadInspeccion;
+  entidad_id: string;
+  instrumental_id: string | null;
+  caja_id: string | null;
+  pedido_id: string | null;
+  cantidad: number | null;
+  lote: string | null;
+  resultado: Resultado;
+  motivo: string | null;
+  checklist: ItemChecklist[];
+  medidas: MedidaControlada[];
+  observaciones: string | null;
+  accion_correctiva: string | null;
+  accion_cerrada: boolean;
+  cerrada_en: string | null;
+  cerrada_por: string | null;
+  creado_en: string;
+}
+export interface PlantillaCalidad {
+  id: string;
+  instrumental_id: string | null;
+  nombre: string;
+  items: string[];
+}
 
-export const SECCION_NOVEDAD_LABEL: Record<string, string> = {
-  cajas: "Caja",
-  instrumentales: "Instrumental",
-  partes: "Medida/parte",
-  planos: "Plano",
-  notas: "Nota fabr.",
-  tareas: "Tarea",
-  codigo: "App",
-  general: "General",
-};
+export interface Persona {
+  id: string;
+  nombre: string;
+  activa: boolean;
+}
 
-// ---------------- Tareas de mejora ----------------
+export interface Apariencia {
+  empresa: string;
+  color: string;
+  logo_path: string | null;
+  modo: "claro" | "oscuro" | "auto";
+}
+
+export interface SinClasificar {
+  id: string;
+  caja_id: string | null;
+  nombre: string;
+  nota: string | null;
+}
+
 export type Prioridad = "alta" | "media" | "baja";
-
 export interface Tarea {
   id: string;
   titulo: string;
@@ -153,21 +218,22 @@ export interface Tarea {
   prioridad: Prioridad;
   hecha: boolean;
   hecha_en: string | null;
-  hecha_por_nombre: string | null;
-  creado_por_nombre: string | null;
+  hecha_por: string | null;
+  creado_por: string | null;
   creado_en: string;
-  caja: { id: string; numero: number; nombre: string } | null;
-  instrumental: { id: string; codigo: string; nombre: string } | null;
 }
-
-export const PRIORIDAD_LABEL: Record<Prioridad, string> = { alta: "Alta", media: "Media", baja: "Baja" };
-export const PRIORIDAD_ORDEN: Record<Prioridad, number> = { alta: 0, media: 1, baja: 2 };
-
-// ---------------- Chat del equipo ----------------
-export interface Mensaje {
+export interface Novedad {
   id: number;
   creado_en: string;
-  autor_id: string | null;
-  autor_nombre: string | null;
+  autor: string;
+  origen: "app" | "manual" | "claude" | "sistema";
+  seccion: string;
+  titulo: string;
+  detalle: string | null;
+}
+export interface Mensaje {
+  id: number;
+  autor: string;
   texto: string;
+  creado_en: string;
 }

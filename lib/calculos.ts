@@ -1,251 +1,273 @@
-// =============================================================
-// Cálculos del control de producción.
-// ÚNICO lugar donde vive la lógica que antes estaba en las fórmulas del Excel.
-// Funciones puras: no tocan la base ni la interfaz → fáciles de testear.
-// =============================================================
+// ★ Lógica de negocio (la misma del Excel). Funciones puras: sin base de datos ni React.
+// Cualquier cambio acá lleva su test en tests/calculos.test.ts.
+// La regla de armado de caja (planArmadoCaja) está duplicada a propósito en SQL: taller.armar_caja (0007_taller.sql).
 
-export type Tipo = "simple" | "medidas" | "complejo";
-export type Estado = "disponible" | "en_proceso" | "falta" | "sin_partes";
-export type EstadoCaja = "completa" | "en_proceso" | "no_disponible" | "vacia";
+import type { Componente, Instrumental, TipoInstrumental } from "./tipos";
 
-export interface ParteCalc {
-  id: string;
-  codigo_o_medida: string;
-  nombre?: string | null;
-  /** Cant. por juego (Medidas) o cant. por instrumental (Complejo) */
-  cant_por_unidad: number;
-  stock: number;
-}
-
-export interface InstrumentalCalc {
-  id: string;
-  codigo: string;
-  nombre: string;
-  tipo: Tipo;
-  cant_por_caja: number;
-  stock_terminado: number;
-  unidades_armadas: number;
-  partes: ParteCalc[];
-}
-
-export interface ResultadoInstrumental {
-  estado: Estado;
-  stockCompleto: number;
-  cajasQueAlcanza: number;
-  /** Texto corto de qué falta para UNA caja (null si está disponible) */
-  faltaTexto: string | null;
-}
-
-export interface ResumenCaja {
-  cajasCompletas: number;
-  total: number;
-  disponibles: number;
-  enProceso: number;
-  faltan: number;
-  sinPartes: number;
-  estado: EstadoCaja;
-}
-
-const n = (x: number | null | undefined) => (Number.isFinite(x) ? Math.max(0, Math.trunc(x as number)) : 0);
-
-/** Partes válidas para el cálculo (en el Excel, filas sin cantidad se ignoran). */
-function partesValidas(i: InstrumentalCalc): ParteCalc[] {
-  return (i.partes ?? []).filter((p) => n(p.cant_por_unidad) > 0);
-}
-
-export function etiquetaParte(p: ParteCalc): string {
-  return p.nombre ? `${p.codigo_o_medida} ${p.nombre}` : p.codigo_o_medida;
-}
-
-/** MIN( floor(stock / cant) ) sobre las partes; 0 si no hay partes (igual que el Excel). */
-function minJuegos(partes: ParteCalc[]): number {
-  if (partes.length === 0) return 0;
-  return Math.min(...partes.map((p) => Math.floor(n(p.stock) / n(p.cant_por_unidad))));
-}
-
-/**
- * Stock completo:
- *  Simple   → stock_terminado
- *  Medidas  → juegos completos = MIN(floor(stock_medida / cant_por_juego))
- *  Complejo → unidades_armadas + MIN(floor(stock_parte / cant_por_instrumental))
- */
-export function stockCompleto(i: InstrumentalCalc): number {
-  switch (i.tipo) {
-    case "simple":
-      return n(i.stock_terminado);
-    case "medidas":
-      return minJuegos(partesValidas(i));
-    case "complejo":
-      return n(i.unidades_armadas) + minJuegos(partesValidas(i));
-  }
-}
-
-/** Cajas que alcanza = floor(stock_completo / cant_por_caja). */
-export function cajasQueAlcanza(i: InstrumentalCalc): number {
-  const cpc = n(i.cant_por_caja);
-  if (cpc <= 0) return 0;
-  return Math.floor(stockCompleto(i) / cpc);
-}
-
-/** ¿Hay "algo" hecho? (stock > 0, alguna medida/parte con stock, o unidades armadas > 0) */
-function hayAlgo(i: InstrumentalCalc): boolean {
-  switch (i.tipo) {
-    case "simple":
-      return n(i.stock_terminado) > 0;
-    case "medidas":
-      return partesValidas(i).some((p) => n(p.stock) > 0);
-    case "complejo":
-      return n(i.unidades_armadas) > 0 || partesValidas(i).some((p) => n(p.stock) > 0);
-  }
-}
-
-/**
- * "Sin partes cargadas": Medidas sin medidas, o Complejo sin partes y sin unidades armadas.
- * (Un complejo con unidades armadas se evalúa normal aunque no tenga partes definidas.)
- */
-export function sinPartes(i: InstrumentalCalc): boolean {
-  if (i.tipo === "simple") return false;
-  if (partesValidas(i).length > 0) return false;
-  return i.tipo === "medidas" || n(i.unidades_armadas) === 0;
-}
-
-/** Medidas/partes que no alcanzan para UNA caja. */
-export function partesQueFaltan(i: InstrumentalCalc): ParteCalc[] {
-  const cpc = n(i.cant_por_caja);
-  if (i.tipo === "medidas") {
-    return partesValidas(i).filter((p) => n(p.stock) < n(p.cant_por_unidad) * cpc);
-  }
-  if (i.tipo === "complejo") {
-    const resto = Math.max(0, cpc - n(i.unidades_armadas));
-    if (resto === 0) return [];
-    return partesValidas(i).filter((p) => n(p.stock) < n(p.cant_por_unidad) * resto);
-  }
-  return [];
-}
-
-export function evaluarInstrumental(i: InstrumentalCalc): ResultadoInstrumental {
-  const sc = stockCompleto(i);
-  const cqa = cajasQueAlcanza(i);
-  const cpc = n(i.cant_por_caja);
-
-  if (sinPartes(i)) {
-    return {
-      estado: "sin_partes",
-      stockCompleto: sc,
-      cajasQueAlcanza: cqa,
-      faltaTexto: i.tipo === "medidas" ? "Falta cargar las medidas" : "Falta cargar las partes",
-    };
-  }
-  if (cqa >= 1) {
-    return { estado: "disponible", stockCompleto: sc, cajasQueAlcanza: cqa, faltaTexto: null };
-  }
-  if (!hayAlgo(i)) {
-    return { estado: "falta", stockCompleto: sc, cajasQueAlcanza: cqa, faltaTexto: "Sin stock" };
-  }
-
-  let faltaTexto: string;
-  if (i.tipo === "simple") {
-    faltaTexto = `Hay ${sc} de ${cpc} unid. por caja`;
-  } else {
-    const faltan = partesQueFaltan(i).map(etiquetaParte);
-    faltaTexto = faltan.length > 0 ? `Falta: ${faltan.join(", ")}` : "Faltan partes por definir";
-    if (i.tipo === "complejo" && n(i.unidades_armadas) > 0) {
-      faltaTexto = `Armadas ${n(i.unidades_armadas)} de ${cpc} · ${faltaTexto}`;
-    }
-  }
-  return { estado: "en_proceso", stockCompleto: sc, cajasQueAlcanza: cqa, faltaTexto };
-}
-
-/** Cajas completas = MIN(cajas que alcanza) de todos los instrumentales (0 si no hay). */
-export function cajasCompletas(instrumentales: InstrumentalCalc[]): number {
-  if (instrumentales.length === 0) return 0;
-  return Math.min(...instrumentales.map(cajasQueAlcanza));
-}
-
-export function resumenCaja(instrumentales: InstrumentalCalc[]): ResumenCaja {
-  const evals = instrumentales.map(evaluarInstrumental);
-  const cuenta = (e: Estado) => evals.filter((x) => x.estado === e).length;
-  const r = {
-    cajasCompletas: cajasCompletas(instrumentales),
-    total: instrumentales.length,
-    disponibles: cuenta("disponible"),
-    enProceso: cuenta("en_proceso"),
-    faltan: cuenta("falta"),
-    sinPartes: cuenta("sin_partes"),
-  };
-  let estado: EstadoCaja;
-  if (r.total === 0) estado = "vacia";
-  else if (r.disponibles === r.total) estado = "completa";
-  else if (r.disponibles === 0 && r.enProceso === 0) estado = "no_disponible";
-  else estado = "en_proceso";
-  return { ...r, estado };
-}
-
-// -------------------------------------------------------------
-// Lista de qué fabricar
-// -------------------------------------------------------------
-
-export interface FilaFabricar {
-  /** null = fila del instrumental (Simple / unidades a armar de un Complejo) */
-  parteId: string | null;
-  etiqueta: string;
-  /** null = no se puede calcular (sin medidas/partes cargadas) */
-  cantidad: number | null;
-}
-
-/**
- * Qué hace falta para llegar a `objetivo` cajas completas.
- *  Simple   → max(0, cpc × obj − stock_terminado)
- *  Medidas  → por medida: max(0, cant_por_juego × cpc × obj − stock)
- *  Complejo → unidades = max(0, cpc × obj − unidades_armadas);
- *             por parte: max(0, cant_por_instrumental × unidades − stock_parte)
- */
-export function aFabricar(i: InstrumentalCalc, objetivo: number): FilaFabricar[] {
-  const obj = n(objetivo);
-  const cpc = n(i.cant_por_caja);
-  const partes = partesValidas(i);
-
-  if (i.tipo === "simple") {
-    return [{ parteId: null, etiqueta: "Terminado", cantidad: Math.max(0, cpc * obj - n(i.stock_terminado)) }];
-  }
-  if (i.tipo === "medidas") {
-    if (partes.length === 0) return [{ parteId: null, etiqueta: "Sin medidas cargadas", cantidad: null }];
-    return partes.map((p) => ({
-      parteId: p.id,
-      etiqueta: etiquetaParte(p),
-      cantidad: Math.max(0, n(p.cant_por_unidad) * cpc * obj - n(p.stock)),
-    }));
-  }
-  const unidades = Math.max(0, cpc * obj - n(i.unidades_armadas));
-  const filas: FilaFabricar[] = [{ parteId: null, etiqueta: "Unidades a armar", cantidad: unidades }];
-  if (partes.length === 0) {
-    if (unidades > 0) filas.push({ parteId: null, etiqueta: "Sin partes cargadas", cantidad: null });
-    return filas;
-  }
-  for (const p of partes) {
-    filas.push({
-      parteId: p.id,
-      etiqueta: etiquetaParte(p),
-      cantidad: Math.max(0, n(p.cant_por_unidad) * unidades - n(p.stock)),
-    });
-  }
-  return filas;
-}
-
-// -------------------------------------------------------------
-// Textos y estilos de estado (para que toda la UI use lo mismo)
-// -------------------------------------------------------------
-
+export type Estado = "disponible" | "en_proceso" | "falta" | "sin_definir";
 export const ESTADO_INFO: Record<Estado, { label: string; icono: string }> = {
   disponible: { label: "Disponible", icono: "✓" },
   en_proceso: { label: "En proceso", icono: "◐" },
   falta: { label: "Falta", icono: "✕" },
-  sin_partes: { label: "Sin partes cargadas", icono: "○" },
+  sin_definir: { label: "Sin definir", icono: "○" },
 };
 
-export const ESTADO_CAJA_INFO: Record<EstadoCaja, { label: string; estado: Estado }> = {
-  completa: { label: "Caja completa", estado: "disponible" },
-  en_proceso: { label: "Caja en proceso", estado: "en_proceso" },
-  no_disponible: { label: "Caja no disponible", estado: "falta" },
-  vacia: { label: "Sin instrumentales", estado: "sin_partes" },
-};
+type CompCalc = Pick<Componente, "id" | "clase" | "codigo_o_medida" | "nombre" | "cant_por_unidad" | "stock">;
+export type InstCalc = Pick<Instrumental, "id" | "nombre" | "tipo" | "stock_terminado" | "unidades_armadas"> & { componentes: CompCalc[] };
+
+/** Medidas (si es de medidas) o piezas (si es complejo). Los simples no tienen. */
+export function componentesDe(inst: InstCalc): CompCalc[] {
+  if (inst.tipo === "simple") return [];
+  const clase = inst.tipo === "medidas" ? "medida" : "pieza";
+  return inst.componentes.filter((c) => c.clase === clase);
+}
+
+export const nombreComponente = (c: Pick<Componente, "codigo_o_medida" | "nombre">) =>
+  c.nombre ? `${c.codigo_o_medida} · ${c.nombre}` : c.codigo_o_medida;
+
+/** Medidas o Complejo sin medidas/piezas cargadas. */
+export function sinDefinir(inst: InstCalc): boolean {
+  return inst.tipo !== "simple" && componentesDe(inst).length === 0;
+}
+
+/** Juegos (medidas) o instrumentales (piezas) completos que se arman con los componentes sueltos. Lo limita el que menos hay. */
+export function completosConComponentes(inst: InstCalc): number {
+  const comps = componentesDe(inst);
+  if (comps.length === 0) return 0;
+  return Math.min(...comps.map((c) => Math.floor(c.stock / c.cant_por_unidad)));
+}
+
+/** Stock completo. Simple: stock terminado. Medidas: juegos completos. Complejo: armados + los que salen de las piezas. */
+export function stockCompleto(inst: InstCalc): number {
+  if (inst.tipo === "simple") return inst.stock_terminado;
+  if (inst.tipo === "medidas") return completosConComponentes(inst);
+  return inst.unidades_armadas + completosConComponentes(inst);
+}
+
+/** ¿Hay algo de stock (aunque no alcance para uno completo)? */
+export function hayAlgo(inst: InstCalc): boolean {
+  if (inst.tipo === "simple") return inst.stock_terminado > 0;
+  if (inst.tipo === "complejo" && inst.unidades_armadas > 0) return true;
+  return componentesDe(inst).some((c) => c.stock > 0);
+}
+
+export interface FilaComponente {
+  componente: CompCalc;
+  alcanza: number; // juegos / instrumentales que alcanza esta medida o pieza
+  faltanProximo: number; // cuántas faltan para completar uno más
+  estado: "ok" | "fabricar";
+}
+
+/** Sub-tabla de medidas o piezas (como en el Excel): qué falta para completar el próximo juego o instrumental. */
+export function filasComponentes(inst: InstCalc): FilaComponente[] {
+  const comps = componentesDe(inst);
+  const proximo = completosConComponentes(inst) + 1;
+  return comps.map((c) => {
+    const faltanProximo = Math.max(0, c.cant_por_unidad * proximo - c.stock);
+    return { componente: c, alcanza: Math.floor(c.stock / c.cant_por_unidad), faltanProximo, estado: faltanProximo > 0 ? "fabricar" : "ok" };
+  });
+}
+
+export interface EstadoEnCaja {
+  estado: Estado;
+  completo: number;
+  alcanza: number; // cajas que alcanza
+  falta: string | null; // "Falta: Ø52, Ø58" · "Hay 1 de 2 por caja"
+}
+
+/** Estado de un instrumental dentro de una caja que lleva `cantPorCaja`. */
+export function estadoEnCaja(inst: InstCalc, cantPorCaja: number): EstadoEnCaja {
+  const completo = stockCompleto(inst);
+  const alcanza = cantPorCaja > 0 ? Math.floor(completo / cantPorCaja) : 0;
+  if (sinDefinir(inst)) {
+    return { estado: "sin_definir", completo, alcanza: 0, falta: inst.tipo === "medidas" ? "Sin medidas cargadas" : "Sin piezas cargadas" };
+  }
+  if (alcanza >= 1) return { estado: "disponible", completo, alcanza, falta: null };
+  if (!hayAlgo(inst)) return { estado: "falta", completo, alcanza, falta: "No hay stock" };
+
+  let falta: string;
+  if (inst.tipo === "medidas") {
+    const faltan = componentesDe(inst).filter((c) => c.stock < c.cant_por_unidad * cantPorCaja);
+    falta = `Falta: ${faltan.map((c) => c.codigo_o_medida).join(", ")}`;
+  } else if (inst.tipo === "complejo" && completo === 0) {
+    const resto = Math.max(0, cantPorCaja - inst.unidades_armadas);
+    const faltan = componentesDe(inst).filter((c) => c.stock < c.cant_por_unidad * resto);
+    falta = `Falta: ${faltan.map(nombreComponente).join(", ")}`;
+  } else {
+    falta = `Hay ${completo} de ${cantPorCaja} por caja`;
+  }
+  return { estado: "en_proceso", completo, alcanza, falta };
+}
+
+export interface FilaCaja<I extends InstCalc = InstCalc> extends EstadoEnCaja {
+  inst: I;
+  cantPorCaja: number;
+}
+export interface ResumenCaja<I extends InstCalc = InstCalc> {
+  filas: FilaCaja<I>[];
+  posibles: number; // cajas completas que se pueden armar
+  limitante: FilaCaja<I> | null; // el instrumental que menos alcanza
+  contadores: Record<Estado, number>;
+}
+
+/** Resumen de una caja con el stock compartido. Si la caja no tiene instrumental, se pueden armar 0. */
+export function resumenCaja<I extends InstCalc>(composicion: { inst: I; cantPorCaja: number }[]): ResumenCaja<I> {
+  const filas = composicion.map(({ inst, cantPorCaja }) => ({ inst, cantPorCaja, ...estadoEnCaja(inst, cantPorCaja) }));
+  const contadores: Record<Estado, number> = { disponible: 0, en_proceso: 0, falta: 0, sin_definir: 0 };
+  for (const f of filas) contadores[f.estado]++;
+  if (filas.length === 0) return { filas, posibles: 0, limitante: null, contadores };
+  const limitante = filas.reduce((min, f) => (f.alcanza < min.alcanza ? f : min));
+  return { filas, posibles: limitante.alcanza, limitante, contadores };
+}
+
+// ---------------------------------------------------------------------------
+// Armado de caja (vista previa; la base hace lo mismo en taller.armar_caja)
+// ---------------------------------------------------------------------------
+
+export interface Descuento {
+  instrumental_id: string;
+  componente_id: string | null;
+  campo: "stock_terminado" | "unidades_armadas" | "stock";
+  cantidad: number;
+  etiqueta: string;
+}
+export interface PlanArmado {
+  ok: boolean;
+  descuentos: Descuento[];
+  faltantes: string[];
+}
+
+/**
+ * Qué se descuenta para armar 1 caja.
+ *  Simple   → cant_por_caja del stock terminado.
+ *  Medidas  → cant_por_unidad × cant_por_caja de cada medida.
+ *  Complejo → primero unidades armadas; lo que falte, con piezas sueltas.
+ */
+export function planArmadoCaja(composicion: { inst: InstCalc; cantPorCaja: number }[]): PlanArmado {
+  const descuentos: Descuento[] = [];
+  const faltantes: string[] = [];
+  if (composicion.length === 0) return { ok: false, descuentos, faltantes: ["La caja no tiene instrumental cargado"] };
+
+  for (const { inst, cantPorCaja } of composicion) {
+    if (inst.tipo === "simple") {
+      if (inst.stock_terminado < cantPorCaja) faltantes.push(`${inst.nombre}: hay ${inst.stock_terminado} de ${cantPorCaja}`);
+      descuentos.push({ instrumental_id: inst.id, componente_id: null, campo: "stock_terminado", cantidad: cantPorCaja, etiqueta: inst.nombre });
+    } else if (inst.tipo === "medidas") {
+      const comps = componentesDe(inst);
+      if (comps.length === 0) faltantes.push(`${inst.nombre}: sin medidas cargadas`);
+      for (const c of comps) {
+        const n = c.cant_por_unidad * cantPorCaja;
+        if (c.stock < n) faltantes.push(`${inst.nombre} ${c.codigo_o_medida}: hay ${c.stock} de ${n}`);
+        descuentos.push({ instrumental_id: inst.id, componente_id: c.id, campo: "stock", cantidad: n, etiqueta: `${inst.nombre} ${c.codigo_o_medida}` });
+      }
+    } else {
+      const usaArmadas = Math.min(inst.unidades_armadas, cantPorCaja);
+      const resto = cantPorCaja - usaArmadas;
+      if (usaArmadas > 0) {
+        descuentos.push({ instrumental_id: inst.id, componente_id: null, campo: "unidades_armadas", cantidad: usaArmadas, etiqueta: `${inst.nombre} (armados)` });
+      }
+      if (resto > 0) {
+        const comps = componentesDe(inst);
+        if (comps.length === 0) faltantes.push(`${inst.nombre}: hay ${inst.unidades_armadas} armados de ${cantPorCaja} y no tiene piezas cargadas`);
+        for (const c of comps) {
+          const n = c.cant_por_unidad * resto;
+          if (c.stock < n) faltantes.push(`${inst.nombre} · ${nombreComponente(c)}: hay ${c.stock} de ${n}`);
+          descuentos.push({ instrumental_id: inst.id, componente_id: c.id, campo: "stock", cantidad: n, etiqueta: `${inst.nombre} · ${nombreComponente(c)}` });
+        }
+      }
+    }
+  }
+  return { ok: faltantes.length === 0, descuentos, faltantes };
+}
+
+// ---------------------------------------------------------------------------
+// Qué fabricar (con stock compartido: se suma lo que piden todas las cajas)
+// ---------------------------------------------------------------------------
+
+export interface FilaFabricar<I extends InstCalc = InstCalc> {
+  inst: I;
+  componente: CompCalc | null;
+  cantidad: number;
+  nota: string | null;
+}
+
+/**
+ * Qué hay que fabricar para armar `cajas` (caja → cantidad de cajas a armar).
+ * Como el instrumental es compartido, se suma lo que necesitan todas las cajas antes de comparar con el stock.
+ */
+export function queFabricar<I extends InstCalc>(
+  necesidades: { composicion: { inst: I; cantPorCaja: number }[]; cajas: number }[],
+): FilaFabricar<I>[] {
+  const total = new Map<string, { inst: I; unidades: number }>();
+  for (const n of necesidades) {
+    if (n.cajas <= 0) continue;
+    for (const { inst, cantPorCaja } of n.composicion) {
+      const t = total.get(inst.id) ?? { inst, unidades: 0 };
+      t.unidades += cantPorCaja * n.cajas;
+      total.set(inst.id, t);
+    }
+  }
+
+  const filas: FilaFabricar<I>[] = [];
+  for (const { inst, unidades } of total.values()) {
+    if (inst.tipo === "simple") {
+      const f = unidades - inst.stock_terminado;
+      if (f > 0) filas.push({ inst, componente: null, cantidad: f, nota: null });
+      continue;
+    }
+    const aArmar = inst.tipo === "complejo" ? Math.max(0, unidades - inst.unidades_armadas) : unidades;
+    if (aArmar === 0) continue;
+    const comps = componentesDe(inst);
+    if (comps.length === 0) {
+      filas.push({ inst, componente: null, cantidad: aArmar, nota: inst.tipo === "medidas" ? "Sin medidas cargadas" : "Sin piezas cargadas" });
+      continue;
+    }
+    for (const c of comps) {
+      const f = c.cant_por_unidad * aArmar - c.stock;
+      if (f > 0) filas.push({ inst, componente: c, cantidad: f, nota: null });
+    }
+  }
+  return filas;
+}
+
+/** Cajas que faltan armar para cubrir lo pedido: lo pedido menos las cajas ya armadas (por caja). */
+export function cajasFaltantesParaPedidos(
+  items: { caja_id: string; cantidad: number }[],
+  cajasArmadas: Record<string, number>,
+): Record<string, number> {
+  const pedido: Record<string, number> = {};
+  for (const it of items) pedido[it.caja_id] = (pedido[it.caja_id] ?? 0) + it.cantidad;
+  const faltan: Record<string, number> = {};
+  for (const [caja, n] of Object.entries(pedido)) {
+    const f = n - (cajasArmadas[caja] ?? 0);
+    if (f > 0) faltan[caja] = f;
+  }
+  return faltan;
+}
+
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
+
+export const TIPO_LABEL: Record<TipoInstrumental, string> = { simple: "Simple", medidas: "Medidas", complejo: "Complejo" };
+
+/**
+ * Rango rápido de medidas: "Ø44 a Ø62 de a 2" → Ø44, Ø46, … Ø62. También "N°7.5 a N°20 de a 2.5" o "44-62/2".
+ * Devuelve null si no se entiende.
+ */
+export function generarRango(texto: string): string[] | null {
+  const m = texto
+    .trim()
+    .replace(/,/g, ".")
+    .match(/^([^\d\s.]*)\s*(\d+(?:\.\d+)?)\s*(?:a|-|al|hasta)\s*\1?\s*(\d+(?:\.\d+)?)\s*(?:(?:de a|cada|\/|paso)\s*(\d+(?:\.\d+)?))?$/i);
+  if (!m) return null;
+  const [, prefijo, d, h, p] = m;
+  const desde = Number(d);
+  const hasta = Number(h);
+  const paso = p ? Number(p) : 1;
+  if (!(paso > 0) || hasta < desde || (hasta - desde) / paso > 200) return null;
+  const decimales = Math.max(...[d, h, p ?? "1"].map((x) => (x.split(".")[1] ?? "").length));
+  const salida: string[] = [];
+  for (let v = desde; v <= hasta + 1e-9; v += paso) salida.push(`${prefijo}${Number(v.toFixed(decimales))}`);
+  return salida;
+}

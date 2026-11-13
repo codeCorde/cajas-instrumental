@@ -1,77 +1,49 @@
 import Link from "next/link";
-import { exigirAdmin } from "@/lib/auth";
-import { listarCajasCompletas } from "@/lib/datos";
-import { EtiquetaEjemplo } from "@/components/Estado";
-import FormAccion from "@/components/FormAccion";
-import { guardarCaja } from "./acciones";
-
-export const dynamic = "force-dynamic";
+import { db } from "@/lib/db";
+import { hoyISO } from "@/lib/formato";
 
 export default async function AdminPage() {
-  await exigirAdmin();
-  const cajas = await listarCajasCompletas(false);
-  const proximoNumero = Math.max(0, ...cajas.map((c) => c.numero)) + 1;
-
+  const hoy = hoyISO();
+  const [abiertos, vencidos, noConf] = await Promise.all([
+    db().from("pedidos").select("id", { count: "exact", head: true }).in("estado", ["pendiente", "en_produccion", "listo"]),
+    db().from("pedidos").select("id", { count: "exact", head: true }).in("estado", ["pendiente", "en_produccion", "listo"]).lt("fecha_compromiso", hoy),
+    db().from("inspecciones").select("id", { count: "exact", head: true }).eq("resultado", "no_conforme").eq("accion_cerrada", false),
+  ]);
+  const tarjetas = [
+    {
+      href: "/admin/pedidos",
+      titulo: "Pedidos",
+      texto: "Cargá pedidos, seguí qué falta para cumplirlos y registrá las entregas.",
+      dato: `${abiertos.count ?? 0} abiertos`,
+      alerta: vencidos.count ? `${vencidos.count} vencidos` : null,
+    },
+    {
+      href: "/admin/calidad",
+      titulo: "Control de calidad",
+      texto: "Notas de conformidad: inspecciones, checklist, medidas y acciones correctivas.",
+      dato: null,
+      alerta: noConf.count ? `${noConf.count} no conformidades abiertas` : null,
+    },
+    { href: "/admin/config", titulo: "Configuración", texto: "Apariencia, nombres de las personas y plantillas de calidad.", dato: null, alerta: null },
+  ];
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="space-y-5">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-widest text-tenue">Administración</p>
         <h1 className="titulo text-4xl">Administración</h1>
-        <div className="flex gap-2">
-          <Link href="/admin/usuarios" className="btn">
-            Usuarios
-          </Link>
-          <Link href="/admin/qr" className="btn">
-            QR de carga
-          </Link>
-        </div>
       </div>
-
-      <section className="card overflow-x-auto">
-        <table className="tabla">
-          <thead>
-            <tr>
-              <th>N°</th>
-              <th>Caja</th>
-              <th className="text-right">Instrumentales</th>
-              <th>Estado</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {cajas.map((c) => (
-              <tr key={c.id}>
-                <td className="font-mono">{c.numero}</td>
-                <td className="font-semibold">
-                  {c.nombre} {c.ejemplo && <EtiquetaEjemplo />}
-                </td>
-                <td className="text-right font-mono">{c.instrumentales.length}</td>
-                <td>{c.activa ? "Activa" : <span className="text-tenue">Inactiva (no aparece en la carga)</span>}</td>
-                <td className="text-right">
-                  <Link href={`/admin/cajas/${c.id}`} className="btn text-sm">
-                    Editar
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="card p-4 space-y-3">
-        <h2 className="titulo text-2xl">Nueva caja</h2>
-        <FormAccion accion={guardarCaja} className="flex flex-wrap gap-3 items-end">
-          <label className="w-24">
-            <span className="etiqueta">N°</span>
-            <input name="numero" type="number" min={1} defaultValue={proximoNumero} className="campo font-mono" required />
-          </label>
-          <label className="flex-1 min-w-48">
-            <span className="etiqueta">Nombre</span>
-            <input name="nombre" className="campo" required />
-          </label>
-          <input type="hidden" name="activa" value="on" />
-          <button className="btn btn-primario">Crear caja</button>
-        </FormAccion>
-      </section>
+      <div className="grid gap-4 md:grid-cols-3">
+        {tarjetas.map((t) => (
+          <Link key={t.href} href={t.href} className="card p-5 space-y-2 hover:border-acento">
+            <h2 className="titulo text-2xl">{t.titulo}</h2>
+            <p className="text-sm text-tenue">{t.texto}</p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {t.dato && <span className="rounded-full bg-superficie-2 px-2.5 py-1 text-xs font-semibold">{t.dato}</span>}
+              {t.alerta && <span className="rounded-full bg-falta-bg text-falta px-2.5 py-1 text-xs font-semibold">✕ {t.alerta}</span>}
+            </div>
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }

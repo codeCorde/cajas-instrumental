@@ -1,39 +1,22 @@
-import { createServerClient } from "@supabase/ssr";
+// Todas las rutas piden sesión (también las del QR). Sin sesión → /ingresar y después vuelve a la página original.
 import { NextResponse, type NextRequest } from "next/server";
+import { COOKIE_SESION, leerSesion } from "@/lib/sesion";
 
-const RUTAS_PUBLICAS = ["/login", "/auth"];
+export async function middleware(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
+  const sesion = await leerSesion(req.cookies.get(COOKIE_SESION)?.value);
+  const volver = encodeURIComponent(pathname + search);
 
-/** Refresca la sesión de Supabase y manda a /login (con ?next=) si no hay usuario. */
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    cookies: {
-      getAll: () => request.cookies.getAll(),
-      setAll: (lista) => {
-        lista.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
-        lista.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
-      },
-    },
-  });
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { pathname, search } = request.nextUrl;
-  const esPublica = RUTAS_PUBLICAS.some((r) => pathname === r || pathname.startsWith(r + "/"));
-
-  if (!user && !esPublica) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.search = `?next=${encodeURIComponent(pathname + search)}`;
-    return NextResponse.redirect(url);
+  if (pathname.startsWith("/ingresar")) {
+    // /ingresar/nombre necesita haber puesto la contraseña
+    if (pathname.startsWith("/ingresar/nombre") && !sesion) return NextResponse.redirect(new URL(`/ingresar${search}`, req.url));
+    return NextResponse.next();
   }
-  return response;
+  if (!sesion) return NextResponse.redirect(new URL(`/ingresar?volver=${volver}`, req.url));
+  if (!sesion.nombre) return NextResponse.redirect(new URL(`/ingresar/nombre?volver=${volver}`, req.url));
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|.*\.(?:png|jpg|jpeg|svg|webp)$).*)"],
+  matcher: ["/((?!_next/static|_next/image|icon.svg|favicon.ico).*)"],
 };

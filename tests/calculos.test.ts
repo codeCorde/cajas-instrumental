@@ -1,228 +1,171 @@
 import { describe, expect, it } from "vitest";
 import {
-  aFabricar,
-  cajasCompletas,
-  cajasQueAlcanza,
-  evaluarInstrumental,
+  cajasFaltantesParaPedidos,
+  estadoEnCaja,
+  filasComponentes,
+  generarRango,
+  planArmadoCaja,
+  queFabricar,
   resumenCaja,
   stockCompleto,
-  type InstrumentalCalc,
-  type ParteCalc,
+  type InstCalc,
 } from "@/lib/calculos";
-import { planArmadoCaja } from "@/lib/armado";
 
-// ---------- helpers ----------
-const inst = (o: Partial<InstrumentalCalc> & Pick<InstrumentalCalc, "codigo" | "nombre" | "tipo">): InstrumentalCalc => ({
-  id: o.codigo,
-  cant_por_caja: 1,
-  stock_terminado: 0,
-  unidades_armadas: 0,
-  partes: [],
-  ...o,
-});
-const medida = (m: string, stock: number, cant = 1): ParteCalc => ({ id: m, codigo_o_medida: m, cant_por_unidad: cant, stock });
-const parte = (c: string, nombre: string, stock: number, cant = 1): ParteCalc => ({
-  id: c,
-  codigo_o_medida: c,
+let n = 0;
+const comp = (clase: "medida" | "pieza", codigo: string, stock: number, cant = 1, nombre: string | null = null) => ({
+  id: `c${++n}`,
+  clase,
+  codigo_o_medida: codigo,
   nombre,
   cant_por_unidad: cant,
   stock,
 });
+const simple = (stock: number, id = `s${++n}`): InstCalc => ({ id, nombre: "Cureta", tipo: "simple", stock_terminado: stock, unidades_armadas: 0, componentes: [] });
+const medidas = (stocks: Record<string, number>, id = `m${++n}`): InstCalc => ({
+  id,
+  nombre: "Probador",
+  tipo: "medidas",
+  stock_terminado: 0,
+  unidades_armadas: 0,
+  componentes: Object.entries(stocks).map(([k, v]) => comp("medida", k, v)),
+});
+const complejo = (armadas: number, piezas: [string, number, number][], id = `x${++n}`): InstCalc => ({
+  id,
+  nombre: "Mango",
+  tipo: "complejo",
+  stock_terminado: 0,
+  unidades_armadas: armadas,
+  componentes: piezas.map(([c, s, k]) => comp("pieza", c, s, k)),
+});
 
-// ---------- datos de ejemplo (igual que supabase/seed.sql) ----------
-const colocadores = () =>
-  inst({
-    codigo: "1.5",
-    nombre: "Colocadores Rojos DM",
-    tipo: "medidas",
-    cant_por_caja: 2,
-    partes: [
-      medida("Ø44", 4), medida("Ø46", 3), medida("Ø48", 2), medida("Ø50", 5), medida("Ø52", 1),
-      medida("Ø54", 2), medida("Ø56", 3), medida("Ø58", 0), medida("Ø60", 2),
-    ],
+describe("stock completo", () => {
+  it("simple = stock terminado", () => expect(stockCompleto(simple(4))).toBe(4));
+  it("medidas = la medida que menos hay", () => expect(stockCompleto(medidas({ Ø44: 3, Ø46: 1, Ø48: 5 }))).toBe(1));
+  it("medidas con cant por juego 2", () => {
+    const m = medidas({ Ø44: 5 });
+    m.componentes[0].cant_por_unidad = 2;
+    expect(stockCompleto(m)).toBe(2);
   });
-
-const cajaDM = (): InstrumentalCalc[] => [
-  inst({ codigo: "1.1", nombre: "Probador de cúpula", tipo: "medidas" }),
-  inst({ codigo: "1.2", nombre: "Mango impactor", tipo: "complejo" }),
-  inst({ codigo: "1.3", nombre: "Plástico convexo", tipo: "simple", cant_por_caja: 2, stock_terminado: 1 }),
-  inst({ codigo: "1.4", nombre: "Plástico cóncavo", tipo: "simple", cant_por_caja: 1, stock_terminado: 0 }),
-  colocadores(),
-  inst({ codigo: "1.6", nombre: "Liner DM", tipo: "medidas" }),
-  inst({ codigo: "1.7", nombre: "Prensa", tipo: "complejo" }),
-  inst({ codigo: "1.8", nombre: "Cabeza de prueba", tipo: "medidas" }),
-  inst({ codigo: "1.9", nombre: "Mango de fresas", tipo: "complejo" }),
-  inst({ codigo: "1.10", nombre: "Fresas acetabulares", tipo: "medidas" }),
-];
-
-// ---------- tests ----------
-describe("Caja Doble Movilidad (seed)", () => {
-  const caja = cajaDM();
-  const porCodigo = (c: string) => evaluarInstrumental(caja.find((i) => i.codigo === c)!);
-
-  it("1.3 Plástico convexo: en proceso, hay 1 de 2", () => {
-    const r = porCodigo("1.3");
-    expect(r.stockCompleto).toBe(1);
-    expect(r.cajasQueAlcanza).toBe(0);
-    expect(r.estado).toBe("en_proceso");
-    expect(r.faltaTexto).toBe("Hay 1 de 2 unid. por caja");
-  });
-
-  it("1.4 Plástico cóncavo: falta", () => {
-    expect(porCodigo("1.4").estado).toBe("falta");
-  });
-
-  it("1.5 Colocadores: 0 juegos (Ø58 en 0), falta Ø52 y Ø58 para una caja", () => {
-    const r = porCodigo("1.5");
-    expect(r.stockCompleto).toBe(0);
-    expect(r.estado).toBe("en_proceso");
-    expect(r.faltaTexto).toBe("Falta: Ø52, Ø58");
-  });
-
-  it("instrumentales sin medidas/partes → sin_partes", () => {
-    for (const c of ["1.1", "1.2", "1.6", "1.7", "1.8", "1.9", "1.10"]) {
-      expect(porCodigo(c).estado).toBe("sin_partes");
-    }
-  });
-
-  it("resumen de la caja", () => {
-    expect(resumenCaja(caja)).toEqual({
-      cajasCompletas: 0,
-      total: 10,
-      disponibles: 0,
-      enProceso: 2,
-      faltan: 1,
-      sinPartes: 7,
-      estado: "en_proceso",
-    });
-  });
-
-  it("no se puede armar una caja y dice qué falta", () => {
-    const plan = planArmadoCaja(caja);
-    expect(plan.ok).toBe(false);
-    expect(plan.faltantes).toContain("1.3 Plástico convexo: hay 1 de 2");
-    expect(plan.faltantes).toContain("1.5 Colocadores Rojos DM · Ø58: hay 0 de 2");
-    expect(plan.faltantes).toContain("1.1 Probador de cúpula: sin medidas cargadas");
-  });
-
-  it("lista de fabricar para la próxima caja (objetivo 1)", () => {
-    const filas = aFabricar(colocadores(), 1);
-    const q = Object.fromEntries(filas.map((f) => [f.etiqueta, f.cantidad]));
-    expect(q).toEqual({ Ø44: 0, Ø46: 0, Ø48: 0, Ø50: 0, Ø52: 1, Ø54: 0, Ø56: 0, Ø58: 2, Ø60: 0 });
-    expect(aFabricar(caja[2], 1)).toEqual([{ parteId: null, etiqueta: "Terminado", cantidad: 1 }]);
-    expect(aFabricar(caja[0], 1)[0].cantidad).toBeNull();
+  it("complejo = armados + lo que sale de las piezas", () => expect(stockCompleto(complejo(2, [["1/2", 3, 1], ["2/2", 4, 2]]))).toBe(4));
+  it("medidas sin medidas = 0", () => expect(stockCompleto(medidas({}))).toBe(0));
+  it("ignora componentes de la otra clase", () => {
+    const m = medidas({ Ø44: 2 });
+    m.componentes.push(comp("pieza", "x", 0));
+    expect(stockCompleto(m)).toBe(2);
   });
 });
 
-describe("stock completo y cajas que alcanza", () => {
-  it("Medidas: lo limita la medida que menos hay, respetando cant. por juego", () => {
-    const i = inst({ codigo: "x", nombre: "x", tipo: "medidas", cant_por_caja: 1, partes: [medida("A", 7, 2), medida("B", 9, 1)] });
-    expect(stockCompleto(i)).toBe(3); // floor(7/2)=3, 9 → min 3
-    expect(cajasQueAlcanza(i)).toBe(3);
-  });
-
-  it("Complejo: armadas + lo que se puede armar con partes", () => {
-    const i = inst({
-      codigo: "x",
-      nombre: "Mango",
-      tipo: "complejo",
-      cant_por_caja: 2,
-      unidades_armadas: 1,
-      partes: [parte("A", "Base", 5), parte("B", "Cuerpo", 4, 2), parte("C", "Tornillo", 9, 3)],
-    });
-    expect(stockCompleto(i)).toBe(1 + 2); // min(5, 2, 3) = 2
-    expect(cajasQueAlcanza(i)).toBe(1);
-    expect(evaluarInstrumental(i).estado).toBe("disponible");
-  });
-
-  it("Complejo en proceso indica qué parte falta", () => {
-    const i = inst({
-      codigo: "x",
-      nombre: "Mango",
-      tipo: "complejo",
-      partes: [parte("A", "Base", 1), parte("B", "Cuerpo", 0), parte("C", "Tornillo", 1)],
-    });
-    const r = evaluarInstrumental(i);
-    expect(r.estado).toBe("en_proceso");
-    expect(r.faltaTexto).toBe("Falta: B Cuerpo");
-  });
-
-  it("Complejo con unidades armadas y sin partes se evalúa normal", () => {
-    const i = inst({ codigo: "x", nombre: "x", tipo: "complejo", unidades_armadas: 2 });
-    expect(evaluarInstrumental(i).estado).toBe("disponible");
-    expect(cajasQueAlcanza(i)).toBe(2);
-  });
-
-  it("cajas completas = mínimo entre instrumentales; 0 si la caja está vacía", () => {
-    const a = inst({ codigo: "a", nombre: "a", tipo: "simple", stock_terminado: 5 });
-    const b = inst({ codigo: "b", nombre: "b", tipo: "simple", stock_terminado: 4, cant_por_caja: 2 });
-    expect(cajasCompletas([a, b])).toBe(2);
-    expect(cajasCompletas([])).toBe(0);
-    expect(resumenCaja([]).estado).toBe("vacia");
-    expect(resumenCaja([a, b]).estado).toBe("completa");
-  });
-});
-
-describe("lista de fabricar con objetivo N", () => {
-  it("Complejo: unidades que faltan y partes", () => {
-    const i = inst({
-      codigo: "x",
-      nombre: "x",
-      tipo: "complejo",
-      cant_por_caja: 1,
-      unidades_armadas: 1,
-      partes: [parte("A", "Base", 0), parte("C", "Tornillo", 3, 3)],
-    });
-    // objetivo 3 → faltan 2 unidades; A: 1×2−0=2 ; C: 3×2−3=3
-    expect(aFabricar(i, 3)).toEqual([
-      { parteId: null, etiqueta: "Unidades a armar", cantidad: 2 },
-      { parteId: "A", etiqueta: "A Base", cantidad: 2 },
-      { parteId: "C", etiqueta: "C Tornillo", cantidad: 3 },
+describe("faltantes para el próximo", () => {
+  it("marca qué medidas hay que fabricar para el próximo juego", () => {
+    const filas = filasComponentes(medidas({ Ø44: 2, Ø46: 1, Ø48: 3 }));
+    // completos = 1 → próximo = 2
+    expect(filas.map((f) => [f.componente.codigo_o_medida, f.faltanProximo, f.estado])).toEqual([
+      ["Ø44", 0, "ok"],
+      ["Ø46", 1, "fabricar"],
+      ["Ø48", 0, "ok"],
     ]);
   });
+  it("piezas con cantidad por instrumental", () => {
+    const filas = filasComponentes(complejo(0, [["A", 1, 1], ["B", 1, 2]]));
+    expect(filas.map((f) => f.faltanProximo)).toEqual([0, 1]);
+  });
+});
+
+describe("estado en la caja", () => {
+  it("disponible si alcanza para 1 caja", () => expect(estadoEnCaja(simple(2), 2)).toMatchObject({ estado: "disponible", alcanza: 1 }));
+  it("en proceso con texto 'Hay X de Y'", () => expect(estadoEnCaja(simple(1), 2)).toMatchObject({ estado: "en_proceso", falta: "Hay 1 de 2 por caja" }));
+  it("en proceso: medidas que faltan", () =>
+    expect(estadoEnCaja(medidas({ Ø50: 1, Ø52: 0, Ø58: 0 }), 1)).toMatchObject({ estado: "en_proceso", falta: "Falta: Ø52, Ø58" }));
+  it("en proceso: complejo con piezas sueltas", () =>
+    expect(estadoEnCaja(complejo(0, [["1/4", 1, 1], ["2/4", 0, 1]]), 1)).toMatchObject({ estado: "en_proceso", falta: "Falta: 2/4" }));
+  it("falta si no hay nada", () => expect(estadoEnCaja(simple(0), 1).estado).toBe("falta"));
+  it("sin definir si no tiene medidas o piezas", () => {
+    expect(estadoEnCaja(medidas({}), 1).estado).toBe("sin_definir");
+    expect(estadoEnCaja(complejo(3, []), 1).estado).toBe("sin_definir");
+  });
+});
+
+describe("resumen de caja con stock compartido", () => {
+  const cureta = simple(3, "cureta");
+  const cabeza = medidas({ Ø28: 2, Ø32: 1 }, "cabeza");
+  it("cajas posibles = el instrumental que menos alcanza", () => {
+    const r = resumenCaja([
+      { inst: cureta, cantPorCaja: 1 },
+      { inst: cabeza, cantPorCaja: 1 },
+    ]);
+    expect(r.posibles).toBe(1);
+    expect(r.limitante?.inst.id).toBe("cabeza");
+    expect(r.contadores).toEqual({ disponible: 2, en_proceso: 0, falta: 0, sin_definir: 0 });
+  });
+  it("cada caja se calcula por separado con el mismo stock (no se suma)", () => {
+    const tri = resumenCaja([{ inst: cureta, cantPorCaja: 1 }]);
+    const chm = resumenCaja([{ inst: cureta, cantPorCaja: 2 }]);
+    expect([tri.posibles, chm.posibles]).toEqual([3, 1]);
+  });
+  it("caja vacía = 0", () => expect(resumenCaja([]).posibles).toBe(0));
 });
 
 describe("armado de caja", () => {
-  it("descuenta según la regla cuando hay stock", () => {
-    const caja = [
-      inst({ codigo: "s", nombre: "Simple", tipo: "simple", cant_por_caja: 2, stock_terminado: 3 }),
-      inst({ codigo: "m", nombre: "Medidas", tipo: "medidas", cant_por_caja: 2, partes: [medida("Ø44", 2), medida("Ø46", 4, 2)] }),
-      inst({
-        codigo: "c",
-        nombre: "Complejo",
-        tipo: "complejo",
-        cant_por_caja: 3,
-        unidades_armadas: 1,
-        partes: [parte("A", "Base", 2), parte("B", "Cuerpo", 4, 2)],
-      }),
-    ];
-    const plan = planArmadoCaja(caja);
+  it("descuenta simple, medidas y complejo (primero armados, después piezas)", () => {
+    const s = simple(3, "S");
+    const m = medidas({ Ø44: 2, Ø46: 5 }, "M");
+    m.componentes[1].cant_por_unidad = 2;
+    const c = complejo(1, [["A", 2, 1], ["B", 4, 2]], "C");
+    const plan = planArmadoCaja([
+      { inst: s, cantPorCaja: 2 },
+      { inst: m, cantPorCaja: 2 },
+      { inst: c, cantPorCaja: 3 },
+    ]);
     expect(plan.ok).toBe(true);
-    expect(plan.descuentos.map((d) => [d.instrumentalId, d.parteId, d.campo, d.cantidad])).toEqual([
-      ["s", null, "stock_terminado", 2],
-      ["m", "Ø44", "stock_parte", 2],
-      ["m", "Ø46", "stock_parte", 4],
-      ["c", null, "unidades_armadas", 1],
-      ["c", "A", "stock_parte", 2],
-      ["c", "B", "stock_parte", 4],
+    expect(plan.descuentos.map((d) => [d.instrumental_id, d.campo, d.cantidad])).toEqual([
+      ["S", "stock_terminado", 2],
+      ["M", "stock", 2],
+      ["M", "stock", 4],
+      ["C", "unidades_armadas", 1],
+      ["C", "stock", 2],
+      ["C", "stock", 4],
     ]);
   });
-
-  it("si las unidades armadas alcanzan, no toca las partes", () => {
-    const c = inst({ codigo: "c", nombre: "C", tipo: "complejo", unidades_armadas: 1, partes: [parte("A", "Base", 0)] });
-    const plan = planArmadoCaja([c]);
-    expect(plan.ok).toBe(true);
-    expect(plan.descuentos).toHaveLength(1);
-    expect(plan.descuentos[0].campo).toBe("unidades_armadas");
+  it("si falta algo no arma y dice qué", () => {
+    const plan = planArmadoCaja([{ inst: simple(0), cantPorCaja: 1 }, { inst: medidas({}), cantPorCaja: 1 }]);
+    expect(plan.ok).toBe(false);
+    expect(plan.faltantes).toEqual(["Cureta: hay 0 de 1", "Probador: sin medidas cargadas"]);
   });
+  it("caja sin instrumental no se arma", () => expect(planArmadoCaja([]).ok).toBe(false));
+});
 
-  it("es consistente con cajasCompletas", () => {
-    const casos: InstrumentalCalc[][] = [
-      cajaDM(),
-      [inst({ codigo: "a", nombre: "a", tipo: "simple", stock_terminado: 1 })],
-      [inst({ codigo: "c", nombre: "c", tipo: "complejo", cant_por_caja: 2, unidades_armadas: 1, partes: [parte("A", "x", 1)] })],
-      [inst({ codigo: "c", nombre: "c", tipo: "complejo", cant_por_caja: 2, unidades_armadas: 0, partes: [parte("A", "x", 1)] })],
-    ];
-    for (const c of casos) expect(planArmadoCaja(c).ok).toBe(cajasCompletas(c) >= 1);
+describe("qué fabricar", () => {
+  it("suma lo que piden las cajas que comparten instrumental", () => {
+    const cureta = simple(1, "cureta");
+    const filas = queFabricar([
+      { composicion: [{ inst: cureta, cantPorCaja: 1 }], cajas: 2 }, // TRI ×2
+      { composicion: [{ inst: cureta, cantPorCaja: 1 }], cajas: 1 }, // CHM ×1
+    ]);
+    expect(filas.map((f) => [f.inst.id, f.cantidad])).toEqual([["cureta", 2]]);
   });
+  it("medidas por medida y complejo descontando armados", () => {
+    const m = medidas({ Ø28: 1, Ø32: 0 }, "cabeza");
+    const c = complejo(1, [["1/2", 0, 1], ["2/2", 1, 2]], "palanca");
+    const filas = queFabricar([{ composicion: [{ inst: m, cantPorCaja: 1 }, { inst: c, cantPorCaja: 1 }], cajas: 2 }]);
+    expect(filas.map((f) => [f.inst.id, f.componente?.codigo_o_medida, f.cantidad])).toEqual([
+      ["cabeza", "Ø28", 1],
+      ["cabeza", "Ø32", 2],
+      ["palanca", "1/2", 1],
+      ["palanca", "2/2", 1],
+    ]);
+  });
+  it("avisa los que no tienen medidas cargadas", () => {
+    const filas = queFabricar([{ composicion: [{ inst: medidas({}), cantPorCaja: 1 }], cajas: 1 }]);
+    expect(filas[0]).toMatchObject({ componente: null, cantidad: 1, nota: "Sin medidas cargadas" });
+  });
+  it("nada si alcanza", () => expect(queFabricar([{ composicion: [{ inst: simple(5), cantPorCaja: 1 }], cajas: 2 }])).toEqual([]));
+  it("cajas que faltan para los pedidos", () =>
+    expect(cajasFaltantesParaPedidos([{ caja_id: "DM", cantidad: 2 }, { caja_id: "DM", cantidad: 1 }, { caja_id: "TRI", cantidad: 1 }], { DM: 1, TRI: 4 })).toEqual({ DM: 2 }));
+});
+
+describe("rango de medidas", () => {
+  it("Ø44 a Ø62 de a 2", () => expect(generarRango("Ø44 a Ø62 de a 2")).toEqual(["Ø44", "Ø46", "Ø48", "Ø50", "Ø52", "Ø54", "Ø56", "Ø58", "Ø60", "Ø62"]));
+  it("decimales con coma", () => expect(generarRango("N°7,5 a N°20 de a 2,5")).toEqual(["N°7.5", "N°10", "N°12.5", "N°15", "N°17.5", "N°20"]));
+  it("sin paso", () => expect(generarRango("12-14")).toEqual(["12", "13", "14"]));
+  it("no entiende", () => expect(generarRango("cualquier cosa")).toBeNull());
 });
