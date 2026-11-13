@@ -1,223 +1,119 @@
 # Control de Producción de Cajas de Instrumental
 
-MVP web que reemplaza el Excel de control de producción y stock de cajas de instrumental quirúrgico.
-Replica sus cálculos y suma login, historial de movimientos, lista de qué fabricar y carga rápida por QR desde el celular.
+App web que reemplaza el Excel de control de producción y stock de **cajas de instrumental quirúrgico** (cadera).
+Repite la estructura y los cálculos del Excel y suma: catálogo único de instrumental con **stock compartido** entre cajas,
+procesos de trabajo y planos, armado de cajas, carga por **QR** desde el taller, pedidos y control de calidad.
 
-**Stack:** Next.js 15 (App Router) + TypeScript · Supabase (Postgres, Auth, RLS) · Tailwind CSS 4 · Vercel.
+Producción: <https://cajas-instrumental-eta.vercel.app> · Repo: <https://github.com/codeCorde/cajas-instrumental>
+
+Stack: **Next.js 15** (App Router, Server Actions) + TypeScript · **Supabase** (Postgres + Storage) · **Tailwind 4** · **Vercel**.
 
 ---
 
 ## 1. Qué hay en el proyecto
 
 ```
-app/
-  login/                     Ingreso con email y contraseña (?next= para volver a donde ibas)
-  auth/                      Links de invitación, nueva contraseña, cerrar sesión
-  (app)/page.tsx             Resumen de cajas
-  (app)/cajas/[id]/          Detalle de caja: pestañas, medidor, grilla, panel con + / −
-  (app)/cargar/              Carga rápida por QR (paso 1: caja · paso 2: instrumentales)
-  (app)/fabricar/            Lista de qué fabricar (por caja o global, objetivo N, CSV, imprimir)
-  (app)/planos/              Instrumental de cada caja con sus planos (visor PDF, descarga de DWG/STEP)
-  (app)/tareas/              Tareas de mejora (aclaraciones de médicos) con check «corregido»
-  (app)/novedades/           Registro de cambios: qué se modificó, cuándo y quién
-  (app)/chat/                Chat del equipo en tiempo real (todos los usuarios)
-  (app)/historial/           Movimientos con filtros + CSV            [solo admin]
-  (app)/admin/               Cajas, instrumentales, medidas/partes, notas, usuarios, QR   [solo admin]
-lib/
-  calculos.ts                ★ TODA la lógica de cálculo (stock completo, estados, cajas, a fabricar)
-  armado.ts                  ★ Regla de qué se descuenta al armar una caja (vista previa)
-  useCaja.ts                 Estado en vivo + actualización optimista de los + / −
-  supabase/                  Clientes de Supabase (navegador, servidor, service role)
-components/                  Stepper − / +, chips de estado, medidor, contador de cajas armadas…
-supabase/
-  migrations/0001_tablas.sql Tablas
-  migrations/0002_rls.sql    Permisos y Row Level Security
-  migrations/0003_rpc.sql    Funciones de stock: ajustar_stock, armar_caja, entregar_caja
-  migrations/0004_planos.sql Tabla de planos + bucket privado «planos» en Storage
-  migrations/0005_novedades_tareas.sql  Novedades (registro de cambios) y Tareas de mejora
-  migrations/0006_chat_equipo.sql       Chat del equipo (mensajes en tiempo real)
-  seed.sql                   Datos de ejemplo
-tests/calculos.test.ts       Tests de lib/calculos.ts y lib/armado.ts
-scripts/probar-sql.mjs       Prueba las migraciones + RLS + RPC en un Postgres en memoria
+app/ingresar/            contraseña única → elegir nombre
+app/(app)/               1 Conteo de cajas (/, /cajas/[codigo], /cajas/[codigo]/qr)
+                         2 Instrumental (/instrumental, /instrumental/[id], /instrumental/sin-clasificar)
+                         3 Stock (/stock, /stock/fabricar, /stock/historial)
+                         5 Administración (/admin/pedidos, /admin/calidad, /admin/config)
+                         Equipo: /tareas, /novedades, /chat
+app/taller/[codigo]      4 Vista del taller (se abre con el QR de la caja), mobile-first
+app/archivos/[id]        abre un archivo con link firmado de 10 min (?descargar para bajarlo)
+lib/calculos.ts      ★   lógica de negocio (stock completo, estados, cajas que alcanza, faltantes, armado, qué fabricar)
+lib/datos.ts             lecturas · lib/db.ts cliente service_role · lib/sesion.ts cookie firmada
+middleware.ts            todas las rutas piden sesión
+supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales
+scripts/                 hash-password, probar-sql (app anterior), probar-taller (app nueva)
+tests/calculos.test.ts   tests de los cálculos
 ```
 
----
+## 2. Supabase
 
-## 2. Crear el proyecto en Supabase
+1. Crear el proyecto en <https://supabase.com>.
+2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0008). La 0008 carga el catálogo
+   inicial (todo con stock en 0, `cant_por_caja = 1` y marcado «A confirmar») y pasa los planos de la app anterior.
+   Si Supabase avisa «tablas sin RLS», elegí **Run without RLS**: el script activa RLS en todas las tablas al final.
+3. **Integrations → Data API → Settings → Exposed schemas**: agregar `taller` y guardar.
+   Las tablas de `taller` no tienen permisos para `anon` ni `authenticated`: solo el servidor (service_role) las usa.
+4. **Project Settings → API**: copiar URL, `anon` key y `service_role` key.
 
-1. Entrá a <https://supabase.com>, creá un proyecto nuevo (región São Paulo es la más cercana).
-2. En **SQL Editor → New query**, pegá y corré **en este orden**:
-   1. `supabase/migrations/0001_tablas.sql`
-   2. `supabase/migrations/0002_rls.sql`
-   3. `supabase/migrations/0003_rpc.sql`
-   4. `supabase/migrations/0004_planos.sql`
-   5. `supabase/migrations/0005_novedades_tareas.sql`
-   6. `supabase/migrations/0006_chat_equipo.sql`
-   7. `supabase/seed.sql` (datos de ejemplo; se puede volver a correr, recrea las cajas 1, 2 y 3)
-3. En **Authentication → Sign In / Providers → Email**: dejá habilitado Email. Si no querés que se registre cualquiera,
-   desactivá **Allow new users to sign up** (los usuarios los crea el admin desde la app).
-4. En **Authentication → URL Configuration**:
-   - **Site URL**: la URL de producción (ej. `https://cajas-instrumental.vercel.app`). En local: `http://localhost:3000`.
-   - **Redirect URLs**: agregá `http://localhost:3000/**` y `https://TU-DOMINIO/**`.
-5. (Recomendado) En **Authentication → Emails → Invite user**, cambiá el link de la plantilla por:
-   ```
-   {{ .SiteURL }}/auth/confirmar?token_hash={{ .TokenHash }}&type=invite&next=/auth/nueva-clave
-   ```
-   Con la plantilla por defecto también funciona, pero esta es más robusta.
-   «¿Olvidaste tu contraseña?» (`/auth/recuperar`) funciona con la plantilla por defecto de **Reset password**:
-   el link vuelve a `/auth/nueva-clave` y sirve aunque se abra en otro dispositivo. No hace falta tocarla.
-6. En **Project Settings → API** copiá la **URL**, la **anon key** y la **service_role key**.
+> Vercel **no** corre migraciones: cada migración nueva se pega en el SQL Editor (avisalo en el PR).
 
-> Nota: el SMTP de prueba de Supabase manda pocos emails por hora. Para el día a día podés usar
-> «Crear con contraseña» en Administración → Usuarios (no necesita email) o configurar un SMTP propio.
+## 3. Variables de entorno
 
----
-
-## 3. Correr en local
-
-Requisitos: Node 20 o superior.
-
-```bash
-cp .env.example .env.local      # y completá los valores
-npm install
-npm run dev                     # http://localhost:3000
-```
+Copiá `.env.example` a `.env.local` y completá:
 
 | Variable | Para qué |
 |---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | URL del proyecto de Supabase |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clave pública (respeta RLS) |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Solo servidor.** Invitar / crear usuarios desde Administración |
-| `NEXT_PUBLIC_SITE_URL` | URL pública de la app (la usa el QR y las invitaciones) |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Proyecto de Supabase (la clave pública solo se usa para subir archivos con links firmados) |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Solo servidor.** Toda lectura y escritura pasa por acá |
+| `NEXT_PUBLIC_SITE_URL` | URL pública (la que va en los QR) |
+| `APP_PASSWORD_HASH` | Contraseña única, como hash bcrypt en base64 |
+| `SESSION_SECRET` | Firma la cookie de sesión (≥ 32 caracteres al azar) |
 
-Tests:
-
+### Contraseña única
 ```bash
-npm test            # cálculos (Vitest)
-npm run test:sql    # migraciones + RLS + RPC sobre Postgres en memoria (PGlite)
+npm run hash-password -- --local   # te la pide sin mostrarla, la guarda en .env.local y te da el valor para Vercel
+```
+**Para cambiarla:** generá el valor nuevo, reemplazá `APP_PASSWORD_HASH` en Vercel (Settings → Environment Variables)
+y hacé **Redeploy**. Las sesiones abiertas siguen valiendo; para cerrarlas todas, cambiá también `SESSION_SECRET`.
+
+Después de la contraseña cada persona elige su nombre (o escribe uno nuevo). La sesión dura 30 días y el nombre queda
+en cada movimiento de stock. Se cambia desde el nombre arriba a la derecha. Hay límite de 5 intentos fallidos por minuto por IP.
+
+## 4. Correr en local
+```bash
+npm install
+npm run dev          # http://localhost:3000
+npm test             # cálculos
+npm run test:sql     # migraciones, permisos y RPC sobre Postgres en memoria (PGlite)
 npm run typecheck
 ```
-
----
-
-## 4. Crear el primer usuario admin
-
-1. En Supabase → **Authentication → Users → Add user → Create new user**: poné tu email y una contraseña,
-   y marcá **Auto Confirm User**.
-2. En **SQL Editor** corré (con tu email):
-   ```sql
-   update perfiles set rol = 'admin', nombre = 'Tu nombre'
-   where id = (select id from auth.users where email = 'tu@email.com');
-   ```
-3. Entrá a la app con ese email y contraseña. Desde **Administración → Usuarios** ya podés invitar operarios.
-
-Todo usuario nuevo nace como **operario**; el rol solo lo cambia un admin.
-
----
+En Windows, si PowerShell bloquea `npm`, usá `npm.cmd`.
 
 ## 5. Deploy en Vercel
-
-1. Subí el proyecto a un repositorio de GitHub.
-2. En <https://vercel.com> → **Add New → Project** → importá el repositorio (Vercel detecta Next.js solo).
-3. En **Environment Variables** cargá las 4 variables de la tabla de arriba
-   (`NEXT_PUBLIC_SITE_URL` = la URL que te da Vercel, o tu dominio).
-4. **Deploy**. Después actualizá en Supabase la **Site URL** y las **Redirect URLs** con la URL final.
-5. Entrá como admin → **Administración → QR de carga** → imprimí el QR general para el taller, el de cada caja y,
-   si querés, las etiquetas de cada instrumental (abren directo su + / −).
-
----
+1. Importar el repo en Vercel (framework Next.js).
+2. Cargar las variables de la sección 3 en **Production** y **Preview**.
+3. Cada push a `main` se publica solo. Cada PR tiene su link de vista previa (**usa la misma base**: los datos son reales).
 
 ## 6. Cómo funciona
 
-### Roles
+### Instrumental y cajas
+Un solo catálogo; un instrumental puede ir en varias cajas y su stock es uno solo. `composicion_caja` dice cuántos lleva
+cada caja. Tipos: **Simple** (stock terminado), **Medidas** (juego de medidas, cada una con su stock) y **Complejo**
+(piezas sueltas + unidades armadas; «Armar 1 unidad» descuenta las piezas).
 
-| | Admin | Operario |
-|---|---|---|
-| Ver resumen, cajas, estados, qué fabricar | ✓ | ✓ |
-| + / − de stock, unidades armadas, medidas, partes | ✓ | ✓ |
-| + / − de cajas armadas | ✓ | ✓ |
-| Crear / editar / borrar cajas, instrumentales, partes, notas, links | ✓ | |
-| Historial y CSV | ✓ | |
-| Usuarios y QR | ✓ | |
+### Cálculos — `lib/calculos.ts`
+- **Stock completo**: Simple = stock terminado · Medidas = juegos completos (lo limita la medida que menos hay) ·
+  Complejo = armados + los que salen de las piezas.
+- **Cajas que alcanza** = `floor(stock completo / cant por caja)`; **cajas que se pueden armar** = el mínimo de la caja.
+- **Estados**: ✓ Disponible · ◐ En proceso (con qué falta) · ✕ Falta · ○ Sin definir.
+- Como el stock es compartido, «se pueden armar» se calcula por caja y **no se suma**.
 
-Los permisos se aplican **en la base** (RLS + permisos por columna), no solo en la pantalla:
-las columnas de stock no se pueden modificar con un `UPDATE` directo, ni siquiera el admin.
-Solo cambian a través de las funciones RPC, que en la misma transacción registran el movimiento.
+### Stock solo por RPC (transaccionales, registran el movimiento)
+`taller.ajustar_stock`, `armar_instrumental`, `armar_caja`, `desarmar_caja`, `entregar_pedido` (en `0007_taller.sql`).
+El stock nunca baja de 0 y el historial no se puede editar ni borrar. La regla de armado de caja está también en
+`planArmadoCaja` (vista previa): si cambia una, cambia la otra.
 
-### Cálculos (iguales al Excel) — `lib/calculos.ts`
+### Archivos
+Bucket privado `planos`. El navegador sube directo a Storage con un link firmado (Vercel limita a 4,5 MB lo que pasa por
+el servidor). PDF e imágenes se ven en la web; DWG y STP se descargan. Subir un archivo con el mismo nombre deja el
+anterior como «versión anterior».
 
-- **Stock completo**: Simple = stock terminado · Medidas = `MIN(floor(stock_medida / cant_por_juego))` ·
-  Complejo = unidades armadas + `MIN(floor(stock_parte / cant_por_instrumental))`.
-- **Cajas que alcanza** = `floor(stock completo / cant. por caja)`.
-- **Estado**: ✓ Disponible (alcanza ≥ 1) · ◐ En proceso (hay algo) · ✕ Falta (nada) · ○ Sin partes cargadas.
-- **Cajas completas** = mínimo de «cajas que alcanza» entre todos los instrumentales.
+### Imprimir los QR
+Conteo de cajas → abrí una caja → **▦ QR de la caja**. Elegí **Hoja A4** o **Etiqueta chica** y tocá **Imprimir**.
+El QR abre `/taller/<código>`: carga de stock con + / −, qué falta y procesos. Pide la contraseña si el celular no tiene sesión.
 
-### Armar / entregar cajas
-
-- **+ caja armada**: muestra qué se va a descontar y pide confirmación. Descuenta automáticamente lo que lleva
-  una caja (simple → stock terminado; medidas → cant. por juego × cant. por caja; complejo → primero unidades
-  armadas, después partes sueltas). Si falta algo, no la arma y muestra qué falta.
-- **− caja armada** (entrega / venta): solo baja el contador.
-- La regla está aislada en la RPC `armar_caja` (`0003_rpc.sql`) y replicada en `lib/armado.ts` para la vista previa.
-  Si la cambiás, cambiala en los dos lugares. `tests/calculos.test.ts` y `scripts/probar-sql.mjs` prueban el mismo
-  caso de armado (mismos datos, mismos descuentos esperados), así que si una cambia y la otra no, falla un test.
-
----
-
-### Planos
-
-- Menú **Planos**: todas las cajas con su instrumental; buscador por nombre, código o plano.
-- Cada instrumental tiene su página con el visor de PDF y botones para bajar los DWG / STEP (no se ven en el navegador).
-- Los archivos están en un bucket **privado** de Supabase Storage: solo usuarios logueados los ven, con links que vencen
-  a los 10 minutos. Solo el admin sube, renombra o borra (Administración → instrumental → Planos, o la caja para el
-  plano general).
-- Carga inicial desde la carpeta «Recopilación cajas de cirugía»:
-  `node scripts/importar-cajas.mjs "C:\Users\Admin\Desktop\Recopilación cajas de cirugía"` (se puede repetir sin duplicar).
-
-## 7. Cómo ampliar
-
-- **Nuevo cálculo o estado** → `lib/calculos.ts` + un test en `tests/calculos.test.ts`.
-- **Nuevo campo de instrumental** → columna en una migración nueva (`0005_...sql`), agregala al `grant insert/update`
-  de `0002_rls.sql`, al tipo en `lib/tipos.ts` y al formulario en `app/(app)/admin/instrumentales/[id]/page.tsx`.
-- **Nuevo motivo de movimiento** → `alter type motivo_movimiento add value '...'` y `MOTIVO_LABEL` en `lib/tipos.ts`.
-
-Preparado para más adelante (no implementado): QR por lote, importación desde Excel,
-órdenes de producción, clientes y pedidos (la tabla `movimientos` ya tiene `motivo` y `nota` para enlazarlos).
-
----
-
-## 8. Trabajo en equipo (con Claude Code)
-
-Repositorio privado: <https://github.com/codeCorde/cajas-instrumental>. Cada push a `main` se publica solo en Vercel.
-
-**Primera vez en una compu nueva**
-
-```bash
-git clone https://github.com/codeCorde/cajas-instrumental.git
-cd cajas-instrumental
-npm install
-cp .env.example .env.local   # pedile los valores al admin por un canal privado (nunca por el repo)
-npm run dev
-```
-
-**Cada tarea**
-
-1. `git checkout main && git pull`, después `git checkout -b feat/lo-que-sea`.
-2. Trabajá (con Claude Code abierto en la carpeta del repo: lee `CLAUDE.md` solo y respeta sus reglas).
+## 7. Trabajo en equipo (con Claude Code)
+1. `git checkout main && git pull` → `git checkout -b feat/lo-que-sea`.
+2. Trabajá (Claude Code lee `CLAUDE.md` y respeta sus reglas).
 3. `npm run typecheck && npm test && npm run test:sql`.
-4. `git push -u origin feat/lo-que-sea` y abrí un Pull Request. GitHub corre el CI y Vercel arma un link de vista previa.
-5. El otro socio revisa, aprueba y mergea. Al mergear a `main`, se publica en producción.
+4. Push y Pull Request: corre el CI y Vercel arma la vista previa. El otro socio revisa y mergea.
 
-Si el PR trae una migración nueva, el admin la corre en el SQL Editor de Supabase **antes** de mergear.
-La vista previa usa la misma base que producción: cuidado con los datos que se cargan ahí.
+Si el PR trae una migración, se corre en el SQL Editor **antes** de mergear.
 
-### Claude en GitHub (tareas en 2do plano)
-Con `.github/workflows/claude.yml`, cualquiera del equipo puede escribir **@claude** en un issue o en un comentario de PR
-(ej.: «@claude agregá el campo cliente a la caja») y Claude trabaja solo en la nube: responde ahí mismo o deja una rama
-con los cambios para revisar. Solo responde a dueño, miembros y colaboradores del repo.
-
-Lo activa una vez el **admin del repo**:
-1. Instalar la app de Claude en este repo: <https://github.com/apps/claude>.
-2. En su compu, con Claude Code instalado, correr `claude setup-token` y copiar el token que muestra.
-3. En GitHub: **Settings → Secrets and variables → Actions → New repository secret**, nombre `CLAUDE_CODE_OAUTH_TOKEN`,
-   pegar el token. (Nunca pegarlo en código, issues ni PRs.)
+### Claude en GitHub
+Escribí **@claude** en un issue o comentario de PR y Claude trabaja en la nube (`.github/workflows/claude.yml`).
+Usa el secreto `CLAUDE_CODE_OAUTH_TOKEN` (se genera con `claude setup-token`; nunca pegarlo en código, issues ni PRs).
