@@ -59,3 +59,29 @@ Más contexto: `README.md` (instalación y funcionamiento) y `DECISIONES.md` (po
 - Commits y PRs en español, cortos y descriptivos.
 - **Novedades**: los cambios de estructura se registran desde las Server Actions (`registrarNovedad`). Cuando Claude haga un cambio de la app
   que el equipo deba conocer, sumar una fila con `origen = 'claude'` y `seccion = 'codigo'` en la migración del PR.
+
+## Plugins y conectores de Claude (más allá del código)
+Además del código, Claude ayuda con producción, investigación, diseño, marketing y ventas del negocio.
+Los plugins son de Anthropic (`anthropics/knowledge-work-plugins`) y se instalan **por computadora**:
+el otro socio tiene que instalarlos en la suya para usarlos.
+
+```bash
+claude plugin marketplace add anthropics/knowledge-work-plugins
+claude plugin install productivity@knowledge-work-plugins   # y lo mismo con: small-business, operations,
+                                                            # product-management, marketing, design, sales
+```
+
+| Necesidad | Usar | Ejemplo de pedido |
+|---|---|---|
+| Pendientes personales (las mejoras de la app van en la sección **Tareas** de la app) | `productivity:task-management` | «Anotá como pendiente llamar al proveedor de acero» |
+| Documentar procesos del taller | `operations:process-doc`, `operations:runbook` | «Documentá el proceso de armado de una caja» |
+| Riesgos, proveedores, avance | `operations:risk-assessment`, `vendor-review`, `status-report` | «Hacé el informe de avance del mes» |
+| Nuevas funciones de la app | `product-management:write-spec`, `roadmap-update` | «Escribí la especificación de órdenes de producción» |
+| Competencia e investigación | `product-management:competitive-brief`, `deep-research`, PubMed / SciSpace | «Compará proveedores de cajas de instrumental en Argentina» |
+| Revisar pantallas y textos | `design:design-critique`, `design:ux-copy`, `design:accessibility-review` | «Revisá la pantalla de Cargar en el celular» |
+| Marketing | `marketing:campaign-plan`, `content-creation`, `brand-review` | «Armá un plan de campaña para clínicas y traumatólogos» |
+| Ventas y presupuestos | `small-business:proposal-builder`, `sales:account-research`, `sales:call-prep` | «Prepará un presupuesto de 2 cajas de cadera» |
+
+Conectores de la cuenta: Notion, Canva, Google Drive / Docs / Sheets / Slides, Gmail, Calendar,
+PubMed, SciSpace y SketchUp (modelos 3D).
+Las reglas de arriba siguen valiendo: **nunca** pegar claves ni datos de `.env*` en Notion, Canva, documentos ni mails.

@@ -114,6 +114,10 @@ El QR abre `/taller/<código>`: carga de stock con + / −, qué falta y proceso
 
 Si el PR trae una migración, se corre en el SQL Editor **antes** de mergear.
 
+### Plugins y conectores de Claude
+Claude también ayuda con producción, investigación, diseño, marketing y ventas (plugins `anthropics/knowledge-work-plugins`,
+se instalan en cada compu). Cómo instalarlos y qué usar para cada cosa: sección **Plugins y conectores** de `CLAUDE.md`.
+
 ### Claude en GitHub
 Escribí **@claude** en un issue o comentario de PR y Claude trabaja en la nube (`.github/workflows/claude.yml`).
 Usa el secreto `CLAUDE_CODE_OAUTH_TOKEN` (se genera con `claude setup-token`; nunca pegarlo en código, issues ni PRs).
