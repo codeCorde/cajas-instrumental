@@ -209,6 +209,10 @@ npm run dev
 Si el PR trae una migración nueva, el admin la corre en el SQL Editor de Supabase **antes** de mergear.
 La vista previa usa la misma base que producción: cuidado con los datos que se cargan ahí.
 
+### Plugins y conectores de Claude
+Claude también ayuda con producción, investigación, diseño, marketing y ventas (plugins `anthropics/knowledge-work-plugins`,
+se instalan en cada compu). Cómo instalarlos y qué usar para cada cosa: sección **Plugins y conectores** de `CLAUDE.md`.
+
 ### Claude en GitHub (tareas en 2do plano)
 Con `.github/workflows/claude.yml`, cualquiera del equipo puede escribir **@claude** en un issue o en un comentario de PR
 (ej.: «@claude agregá el campo cliente a la caja») y Claude trabaja solo en la nube: responde ahí mismo o deja una rama
