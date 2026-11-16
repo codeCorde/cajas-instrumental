@@ -31,7 +31,7 @@ export default function Archivos({
 
   return (
     <div className="space-y-2">
-      {archivos.length === 0 && <p className="text-sm text-tenue">{soloLectura ? "No hay archivos." : "Todavía no hay archivos. Subí planos PDF, DWG, STP o fotos."}</p>}
+      {archivos.length === 0 && <p className="text-sm text-tenue">{soloLectura ? "No hay archivos." : "Todavía no hay archivos. Subí planos PDF, DWG, STP, fotos o programas de mecanizado (.txt, .nc)."}</p>}
       <ul className="divide-y divide-borde">
         {[...vigentes, ...(anteriores ? viejos : [])].map((a) => (
           <FilaArchivo key={a.id} a={a} viendo={viendo === a.id} onVer={() => setViendo(viendo === a.id ? null : a.id)} soloLectura={soloLectura} compacto={compacto} />
@@ -148,7 +148,7 @@ function SubirArchivos({ entidad, entidadId }: { entidad: EntidadArchivo; entida
     <div className="flex flex-wrap items-center gap-2 pt-1">
       <label className="btn min-h-9 px-3 text-sm cursor-pointer">
         ⇪ Subir archivos
-        <input ref={input} type="file" multiple className="sr-only" accept=".pdf,.dwg,.dxf,.stp,.step,image/*" onChange={(e) => subir(e.currentTarget.files)} disabled={!!estado} />
+        <input ref={input} type="file" multiple className="sr-only" accept=".pdf,.dwg,.dxf,.stp,.step,image/*,.txt,.nc,.gcode,.ngc,.tap,.cnc" onChange={(e) => subir(e.currentTarget.files)} disabled={!!estado} />
       </label>
       <span className="text-xs text-tenue" aria-live="polite">
         {estado ?? "PDF, DWG, STP/STEP o imágenes · hasta 50 MB"}

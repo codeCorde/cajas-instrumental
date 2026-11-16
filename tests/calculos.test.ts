@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   cajasFaltantesParaPedidos,
+  estadoTerminadasCaja,
+  listadoGeneral,
+  piezasTerminadas,
+  planFinalizarPedido,
   estadoEnCaja,
   filasComponentes,
   generarRango,
@@ -168,4 +172,45 @@ describe("rango de medidas", () => {
   it("decimales con coma", () => expect(generarRango("N°7,5 a N°20 de a 2,5")).toEqual(["N°7.5", "N°10", "N°12.5", "N°15", "N°17.5", "N°20"]));
   it("sin paso", () => expect(generarRango("12-14")).toEqual(["12", "13", "14"]));
   it("no entiende", () => expect(generarRango("cualquier cosa")).toBeNull());
+});
+
+describe("piezas terminadas (QR de pedidos)", () => {
+  it("simple = stock terminado, medidas = sets completos, complejo = solo armados", () => {
+    expect(piezasTerminadas(simple(4))).toBe(4);
+    expect(piezasTerminadas(medidas({ Ø44: 3, Ø46: 1 }))).toBe(1);
+    expect(piezasTerminadas(complejo(2, [["1/2", 9, 1], ["2/2", 9, 1]]))).toBe(2); // las piezas sueltas no cuentan
+  });
+  it("estado de la caja: completa ●, incompleta ■, vacía ✕", () => {
+    expect(estadoTerminadasCaja([{ inst: simple(2), cantPorCaja: 2 }, { inst: medidas({ Ø44: 1 }), cantPorCaja: 1 }])).toBe("completa");
+    expect(estadoTerminadasCaja([{ inst: simple(1), cantPorCaja: 2 }, { inst: medidas({ Ø44: 1 }), cantPorCaja: 1 }])).toBe("incompleta");
+    expect(estadoTerminadasCaja([{ inst: simple(0), cantPorCaja: 1 }, { inst: complejo(0, [["1/2", 5, 1]]), cantPorCaja: 1 }])).toBe("vacia");
+    expect(estadoTerminadasCaja([])).toBe("vacia");
+  });
+  it("listado general suma los pedidos (ejemplo de las fotos: Laura + Paola)", () => {
+    const laura = { piezas: [{ instrumental_id: "impactor", cantidad: 3 }, { instrumental_id: "fresas", cantidad: 1 }] };
+    const paola = { piezas: [{ instrumental_id: "impactor", cantidad: 3 }, { instrumental_id: "probadores", cantidad: 1 }] };
+    expect(listadoGeneral([laura, paola])).toEqual({ impactor: 6, fresas: 1, probadores: 1 });
+  });
+});
+
+describe("finalizar pedido (misma regla que taller.finalizar_pedido)", () => {
+  it("mismo caso que scripts/probar-taller.mjs: falta S", () => {
+    const s = simple(1, "S");
+    const m: InstCalc = { ...medidas({}), componentes: [comp("medida", "Ø44", 2, 1), comp("medida", "Ø46", 5, 2)] };
+    const c = complejo(3, [["A", 0, 1]]);
+    const plan = planFinalizarPedido([{ inst: s, cantidad: 1 }, { inst: s, cantidad: 1 }, { inst: m, cantidad: 1 }, { inst: c, cantidad: 1 }]);
+    expect(plan.ok).toBe(false);
+    expect(plan.faltantes).toEqual(["Cureta: hay 1 terminados de 2"]);
+    expect(plan.descuentos.map((d) => d.cantidad)).toEqual([2, 1, 2, 1]);
+  });
+  it("con stock alcanza; los complejos usan solo armados", () => {
+    const plan = planFinalizarPedido([{ inst: simple(2), cantidad: 2 }, { inst: complejo(0, [["A", 10, 1]]), cantidad: 1 }]);
+    expect(plan.ok).toBe(false);
+    expect(plan.faltantes).toEqual(["Mango: hay 0 armados de 1"]);
+  });
+  it("pedidos viejos por caja: cajas armadas", () => {
+    expect(planFinalizarPedido([], [{ nombre: "Caja DM", cajas_armadas: 1, cantidad: 2 }]).faltantes).toEqual(["Caja DM: hay 1 cajas armadas de 2"]);
+    expect(planFinalizarPedido([], [{ nombre: "Caja DM", cajas_armadas: 2, cantidad: 2 }]).ok).toBe(true);
+  });
+  it("sin piezas no se finaliza", () => expect(planFinalizarPedido([]).ok).toBe(false));
 });

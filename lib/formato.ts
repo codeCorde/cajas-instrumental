@@ -15,6 +15,8 @@ export function tamanoLegible(bytes: number): string {
 
 export const extension = (nombre: string) => (nombre.includes(".") ? nombre.split(".").pop()!.toLowerCase() : "");
 export const IMAGENES = ["png", "jpg", "jpeg", "webp", "gif"];
+/** Programas de mecanizado (código del Bloc de notas). */
+export const PROGRAMAS_CNC = ["txt", "nc", "gcode", "ngc", "tap", "cnc"];
 export const seVeEnLaWeb = (tipo: string) => tipo === "pdf" || IMAGENES.includes(tipo);
 
 export function iconoArchivo(tipo: string): { icono: string; etiqueta: string } {
@@ -22,11 +24,12 @@ export function iconoArchivo(tipo: string): { icono: string; etiqueta: string } 
   if (tipo === "dwg" || tipo === "dxf") return { icono: "📐", etiqueta: "AutoCAD" };
   if (tipo === "stp" || tipo === "step") return { icono: "🧊", etiqueta: "3D (STEP)" };
   if (IMAGENES.includes(tipo)) return { icono: "🖼", etiqueta: "Imagen" };
+  if (PROGRAMAS_CNC.includes(tipo)) return { icono: "⚙", etiqueta: "Programa de mecanizado" };
   return { icono: "📎", etiqueta: tipo.toUpperCase() || "Archivo" };
 }
 
 export const TAMANO_MAX = 50 * 1024 * 1024;
-export const EXTENSIONES_OK = ["pdf", "dwg", "dxf", "stp", "step", ...IMAGENES];
+export const EXTENSIONES_OK = ["pdf", "dwg", "dxf", "stp", "step", ...IMAGENES, ...PROGRAMAS_CNC];
 
 /** Nombre seguro para la ruta en Storage. */
 export const slug = (t: string) =>

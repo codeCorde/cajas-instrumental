@@ -40,6 +40,7 @@ insert into public.planos (caja_id, instrumental_id, nombre, ruta, formato, tama
 await db.exec(leer("supabase/migrations/0007_taller.sql")); console.log("ok    0007_taller.sql");
 await db.exec(leer("supabase/migrations/0008_taller_datos.sql")); console.log("ok    0008_taller_datos.sql");
 await err(leer("supabase/migrations/0008_taller_datos.sql"), "0008 no se puede correr dos veces");
+await db.exec(leer("supabase/migrations/0009_pedidos_qr_y_ordenes.sql")); console.log("ok    0009_pedidos_qr_y_ordenes.sql");
 
 // ---------- datos iniciales ----------
 ok((await q1(`select count(*)::int n from taller.cajas`)).n === 3, "3 cajas");
@@ -62,6 +63,8 @@ await err(`select * from taller.cajas`, "anon no lee el esquema taller");
 await db.exec(`reset role; set role authenticated;`);
 await err(`select * from taller.instrumentales`, "authenticated tampoco");
 await err(`select taller.ajustar_stock('stock', gen_random_uuid(), 1, 'x')`, "authenticated no ejecuta RPC");
+await err(`select * from taller.pedido_piezas`, "authenticated no lee las piezas pedidas");
+await err(`select taller.crear_pedido('x', '[]'::jsonb)`, "authenticated no crea pedidos");
 await db.exec(`reset role; set role service_role;`);
 
 // ---------- RPC ----------
@@ -129,6 +132,63 @@ await db.exec(`insert into taller.pedido_items (pedido_id, caja_id, cantidad) va
 ok((await q1(`select taller.entregar_pedido('${ped2}','Ana',true) r`)).r.ok === true, "entrega descontando");
 ok((await q1(`select cajas_armadas n from taller.cajas where id='${cp}'`)).n === 0, "descontó la caja armada");
 ok((await q1(`select count(*)::int n from taller.movimientos where motivo='entrega'`)).n === 1, "la entrega quedó en el historial");
+
+// ---------- 0009: pedidos por QR, órdenes, firma y cancelación ----------
+const firma = "data:image/png;base64,iVBORw0KGgo=";
+await err(`select taller.crear_pedido('  ', '[{"instrumental_id":"${s}","cantidad":1}]'::jsonb)`, "pedido sin nombre -> error");
+await err(`select taller.crear_pedido('Laura', '[]'::jsonb)`, "pedido sin piezas -> error");
+await err(`select taller.crear_pedido('Laura', '[{"instrumental_id":"${s}","cantidad":0}]'::jsonb)`, "cantidad 0 -> error");
+await err(`select taller.crear_pedido('Laura', '[{"instrumental_id":"${s}","cantidad":1}]'::jsonb, 'qr', 'javascript:alert(1)')`, "firma que no es PNG -> error");
+ok((await q1(`select count(*)::int n from taller.pedidos where cliente = 'Laura'`)).n === 0, "los pedidos con error no dejaron nada a medias");
+const items1 = JSON.stringify([{ instrumental_id: s, caja_id: cp, cantidad: 1 }, { instrumental_id: s, caja_id: cp, cantidad: 1 }, { instrumental_id: m, cantidad: 1 }, { instrumental_id: c, cantidad: 1 }]);
+const p1 = (await q1(`select taller.crear_pedido('Laura', '${items1}'::jsonb, 'qr', '${firma}', '1.2.3.4') r`)).r;
+ok(/^OP-\d{4}$/.test(p1.numero) && !!p1.token, `pedido por QR con número automático ${p1.numero}`);
+const pz = await filas(`select instrumental_id, cantidad from taller.pedido_piezas where pedido_id='${p1.id}' order by cantidad desc`);
+ok(pz.length === 3 && pz[0].cantidad === 2, "suma las piezas repetidas (2 × S)");
+const ped1 = await q1(`select estado, origen, ip from taller.pedidos where id='${p1.id}'`);
+ok(ped1.estado === "pendiente" && ped1.origen === "qr" && ped1.ip === "1.2.3.4", "entra como «por recepcionar», origen QR");
+await err(`select taller.finalizar_pedido('${p1.id}','Ana')`, "no se arma un pedido sin recepcionar");
+await err(`select taller.firmar_pedido('${p1.id}','Ana','Laura','${firma}')`, "no se firma un pedido sin finalizar");
+await db.exec(`update taller.pedidos set estado='en_produccion', recepcionado_en=now(), recepcionado_por='Ana' where id='${p1.id}'`);
+// stock en este punto (después de la entrega P-002): S=1 · M Ø44=0, Ø46=1 · C 0 armados. Se lleva a S=1 · Ø44=2 · Ø46=5 · C 3 armados
+await db.exec(`select taller.ajustar_stock('stock','${ma}',2,'Ana'); select taller.ajustar_stock('stock','${mb}',4,'Ana'); select taller.ajustar_stock('unidades_armadas','${c}',3,'Ana');`);
+const f0 = await q1(`select taller.finalizar_pedido('${p1.id}','Ana') r`);
+ok(f0.r.ok === false && f0.r.faltantes.length === 1 && f0.r.faltantes[0].startsWith("S:"), `falta S y no toca nada: ${(f0.r.faltantes ?? []).join(" | ")}`);
+ok((await q1(`select stock_terminado n from taller.instrumentales where id='${s}'`)).n === 1, "…el stock quedó igual");
+await db.exec(`select taller.ajustar_stock('stock_terminado','${s}',1,'Ana')`); // S = 2
+const f1 = await q1(`select taller.finalizar_pedido('${p1.id}','Ana') r`);
+ok(f1.r.ok === true, "finaliza el pedido");
+const st3 = await q1(`select (select stock_terminado from taller.instrumentales where id='${s}') s, (select stock from taller.componentes where id='${ma}') ma,
+  (select stock from taller.componentes where id='${mb}') mb, (select unidades_armadas from taller.instrumentales where id='${c}') ua,
+  (select estado from taller.pedidos where id='${p1.id}') e`);
+ok(st3.s === 0 && st3.ma === 1 && st3.mb === 3 && st3.ua === 2 && st3.e === "listo", `descontó terminadas, sets y armados ${JSON.stringify(st3)}`);
+ok((await q1(`select count(*)::int n from taller.movimientos where motivo='pedido'`)).n === 4, "4 movimientos «pedido» en el historial");
+await err(`select taller.finalizar_pedido('${p1.id}','Ana')`, "no se finaliza dos veces");
+await err(`select taller.firmar_pedido('${p1.id}','Ana','Laura','')`, "sin firma no se entrega");
+await err(`select taller.firmar_pedido('${p1.id}','Ana','  ','${firma}')`, "sin nombre de quien recibe no se entrega");
+// cancelar un finalizado devuelve el stock
+const p2 = (await q1(`select taller.crear_pedido('Paola', '${JSON.stringify([{ instrumental_id: c, cantidad: 2 }])}'::jsonb, 'interno') r`)).r;
+await db.exec(`update taller.pedidos set estado='en_produccion' where id='${p2.id}'`);
+ok((await q1(`select taller.finalizar_pedido('${p2.id}','Ana') r`)).r.ok === true, "finaliza el pedido de Paola");
+ok((await q1(`select unidades_armadas n from taller.instrumentales where id='${c}'`)).n === 0, "…descontó 2 armados");
+await db.exec(`select taller.cancelar_pedido('${p2.id}','Paola','Se arrepintió')`);
+const pc = await q1(`select estado, motivo_cancelacion, cancelado_por from taller.pedidos where id='${p2.id}'`);
+ok(pc.estado === "cancelado" && pc.motivo_cancelacion === "Se arrepintió" && pc.cancelado_por === "Paola", "pedido cancelado con motivo");
+ok((await q1(`select unidades_armadas n from taller.instrumentales where id='${c}'`)).n === 2, "la cancelación devolvió los armados");
+ok((await q1(`select count(*)::int n from taller.movimientos where motivo='cancelacion'`)).n === 1, "la devolución quedó en el historial");
+await err(`select taller.cancelar_pedido('${p2.id}','Ana')`, "no se cancela dos veces");
+// firmar
+await db.exec(`select taller.firmar_pedido('${p1.id}','Ana','Laura Gómez','${firma}')`);
+const pe = await q1(`select estado, recibido_por, recibido_en is not null r, entregado_en is not null e, firma_recepcion is not null f from taller.pedidos where id='${p1.id}'`);
+ok(pe.estado === "entregado" && pe.recibido_por === "Laura Gómez" && pe.r && pe.e && pe.f, "firmado → entregado, con fecha de recepción");
+await err(`select taller.cancelar_pedido('${p1.id}','Ana')`, "un pedido entregado no se cancela");
+// pedido viejo por caja: finalizar avisa si faltan cajas armadas
+const p3 = await q1(`insert into taller.pedidos (cliente, estado) values ('Clínica Z','en_produccion') returning id, numero`);
+await db.exec(`insert into taller.pedido_items (pedido_id, caja_id, cantidad) values ('${p3.id}','${cp}',5);`);
+const f3 = await q1(`select taller.finalizar_pedido('${p3.id}','Ana') r`);
+ok(f3.r.ok === false && /cajas armadas/.test(f3.r.faltantes[0]), "pedido por caja: avisa si faltan cajas armadas");
+ok(/^OP-\d{4}$/.test(p3.numero), "los pedidos cargados a mano también reciben número");
+await err(`insert into taller.movimientos (autor, campo, delta, stock_resultante, motivo) values ('x','stock',1,1,'otro')`, "motivo inventado no entra al historial");
 
 console.log(fallas ? `\n${fallas} FALLAS` : "\nTODO OK");
 process.exit(fallas ? 1 : 0);

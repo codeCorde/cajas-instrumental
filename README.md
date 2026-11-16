@@ -23,8 +23,8 @@ app/taller/[codigo]      4 Vista del taller (se abre con el QR de la caja), mobi
 app/archivos/[id]        abre un archivo con link firmado de 10 min (?descargar para bajarlo)
 lib/calculos.ts      ★   lógica de negocio (stock completo, estados, cajas que alcanza, faltantes, armado, qué fabricar)
 lib/datos.ts             lecturas · lib/db.ts cliente service_role · lib/sesion.ts cookie firmada
-middleware.ts            todas las rutas piden sesión
-supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales
+middleware.ts            todas las rutas piden sesión (salvo /pedir y /api/cron)
+supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales · 0009 pedidos por QR y órdenes
 scripts/                 hash-password, probar-sql (app anterior), probar-taller (app nueva)
 tests/calculos.test.ts   tests de los cálculos
 ```
@@ -32,7 +32,7 @@ tests/calculos.test.ts   tests de los cálculos
 ## 2. Supabase
 
 1. Crear el proyecto en <https://supabase.com>.
-2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0008). La 0008 carga el catálogo
+2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0009). La 0008 carga el catálogo
    inicial (todo con stock en 0, `cant_por_caja = 1` y marcado «A confirmar») y pasa los planos de la app anterior.
    Si Supabase avisa «tablas sin RLS», elegí **Run without RLS**: el script activa RLS en todas las tablas al final.
 3. **Integrations → Data API → Settings → Exposed schemas**: agregar `taller` y guardar.
@@ -52,6 +52,10 @@ Copiá `.env.example` a `.env.local` y completá:
 | `NEXT_PUBLIC_SITE_URL` | URL pública (la que va en los QR) |
 | `APP_PASSWORD_HASH` | Contraseña única, como hash bcrypt en base64 |
 | `SESSION_SECRET` | Firma la cookie de sesión (≥ 32 caracteres al azar) |
+| `CRON_SECRET` | Protege el resumen diario (`/api/cron/resumen-diario`). Vercel lo manda solo |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Avisos por Telegram (opcional) |
+| `CALLMEBOT_TELEFONOS`, `CALLMEBOT_APIKEYS` | Avisos por WhatsApp con CallMeBot (opcional, separados por coma) |
+| `NTFY_TEMA`, `NTFY_SERVIDOR` | Notificación push al celular con la app ntfy (opcional) |
 
 ### Contraseña única
 ```bash
@@ -105,6 +109,34 @@ anterior como «versión anterior».
 ### Imprimir los QR
 Conteo de cajas → abrí una caja → **▦ QR de la caja**. Elegí **Hoja A4** o **Etiqueta chica** y tocá **Imprimir**.
 El QR abre `/taller/<código>`: carga de stock con + / −, qué falta y procesos. Pide la contraseña si el celular no tiene sesión.
+
+### Pedidos por QR y producción (migración 0009)
+1. **QR de pedidos** (Producción → QR de pedidos) abre `/pedir`, **sin contraseña**: presentación InstrumentARG de 5 s →
+   elegir caja → cantidad de cada pieza (▲ / número / ▼) → «Agregar al pedido» o «Finalizar pedido» → nombre, fecha y firma
+   → «Realizar orden de trabajo». El solicitante recibe un número (`OP-0001`) y un link secreto para ver el estado o cancelar.
+   No muestra stock. Máximo 10 pedidos por hora por conexión.
+2. **Producción** (4 pestañas):
+   - **Órdenes de producción**: se recepcionan los pedidos nuevos (pasan a orden). Sin elegir una orden se ve el listado
+     general con todo sumado; eligiendo una, su listado y su fecha.
+   - **Stock de partes**: caja → pieza → clasificación (compleja / simple / set completo), cada parte con su stock y su
+     **etapa** del proceso, máquina y mechas/machos, planos 2D/3D y programa de mecanizado (.txt/.nc/.gcode/.tap), comentarios.
+   - **Stock de piezas terminadas**: por caja, ● completa · ■ incompleta · ✕ vacía. Las complejas se suman con «Armar 1»
+     (descuenta 1 de cada parte). «Armar pedido» lleva a la orden para finalizarla.
+   - **Pedidos entregados**: Finalizado (naranja) → «Firmar» → Entregado (verde) con **remito** imprimible.
+3. **Cancelar** se puede desde las dos páginas mientras no esté entregado; si ya estaba finalizado, devuelve el stock.
+4. Estados en la base: `pendiente` = por recepcionar, `en_produccion`, `listo` = finalizado, `entregado`, `cancelado`.
+
+### Avisos al celular
+Cada pedido nuevo, recepcionado, finalizado, firmado o cancelado manda un aviso, y todos los días a las 8:00 (11:00 UTC,
+`vercel.json`) llega un **resumen** con lo pendiente, lo que falta terminar, el estado de cada caja y links para cargar stock
+o un pedido. Se prueba en **Producción → 🔔 Avisos al celular**. Canales (cualquiera, o varios):
+- **Telegram** (recomendado): hablale a `@BotFather` → `/newbot` → token. Agregá el bot a un grupo del equipo, mandá un
+  mensaje y sacá el `chat_id` de `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+- **WhatsApp** (CallMeBot, gratis y de uso personal): cada persona agenda el número de CallMeBot y le manda el mensaje de
+  autorización que indica su web; le responde con su apikey. Teléfonos y apikeys van en el mismo orden.
+- **ntfy** (push): instalá la app ntfy, suscribite a un tema difícil de adivinar y ponelo en `NTFY_TEMA`.
+
+Sin canales configurados no se manda nada (la app funciona igual).
 
 ## 7. Trabajo en equipo (con Claude Code)
 1. `git checkout main && git pull` → `git checkout -b feat/lo-que-sea`.

@@ -22,7 +22,7 @@ export default async function InspeccionPage({ params }: { params: Promise<{ id:
   const cat = await cargarCatalogo();
   const [opciones, archivos] = await Promise.all([opcionesInspeccion(cat), archivosDe("calidad", [id])]);
   const enlace =
-    x.entidad === "instrumental" ? `/instrumental/${x.entidad_id}` : x.entidad === "componente" && x.instrumental_id ? `/instrumental/${x.instrumental_id}` : x.entidad === "pedido" ? `/admin/pedidos/${x.entidad_id}` : null;
+    x.entidad === "instrumental" ? `/instrumental/${x.entidad_id}` : x.entidad === "componente" && x.instrumental_id ? `/instrumental/${x.instrumental_id}` : x.entidad === "pedido" ? `/produccion/pedido/${x.entidad_id}` : null;
 
   return (
     <div className="space-y-5 max-w-4xl">

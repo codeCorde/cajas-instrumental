@@ -26,6 +26,9 @@ export interface Componente {
   descripcion: string | null;
   proceso: string | null;
   orden: number;
+  etapa: string | null;
+  maquina: string | null;
+  herramientas: string | null;
 }
 
 export interface Instrumental {
@@ -45,6 +48,9 @@ export interface Instrumental {
   proceso: string | null;
   a_confirmar: boolean;
   orden: number;
+  etapa: string | null;
+  maquina: string | null;
+  herramientas: string | null;
   componentes: Componente[];
 }
 
@@ -81,7 +87,7 @@ export interface Nota {
   creado_en: string;
 }
 
-export type Motivo = "carga" | "correccion" | "armado_instrumental" | "armado_caja" | "desarmado" | "entrega";
+export type Motivo = "carga" | "correccion" | "armado_instrumental" | "armado_caja" | "desarmado" | "entrega" | "pedido" | "cancelacion";
 export const MOTIVO_LABEL: Record<Motivo, string> = {
   carga: "Carga",
   correccion: "Corrección",
@@ -89,6 +95,8 @@ export const MOTIVO_LABEL: Record<Motivo, string> = {
   armado_caja: "Armado de caja",
   desarmado: "Desarmado",
   entrega: "Entrega",
+  pedido: "Pedido armado",
+  cancelacion: "Pedido cancelado",
 };
 export type CampoStock = "stock_terminado" | "unidades_armadas" | "stock" | "cajas_armadas";
 export const CAMPO_LABEL: Record<CampoStock, string> = {
@@ -115,10 +123,11 @@ export interface Movimiento {
 }
 
 export type EstadoPedido = "pendiente" | "en_produccion" | "listo" | "entregado" | "cancelado";
+// Los valores de la base no cambian; las etiquetas siguen el flujo nuevo (pedido por QR → orden → finalizado → firmado).
 export const ESTADO_PEDIDO_LABEL: Record<EstadoPedido, string> = {
-  pendiente: "Pendiente",
+  pendiente: "Por recepcionar",
   en_produccion: "En producción",
-  listo: "Listo",
+  listo: "Finalizado",
   entregado: "Entregado",
   cancelado: "Cancelado",
 };
@@ -128,16 +137,38 @@ export interface PedidoItem {
   caja_id: string;
   cantidad: number;
 }
+export interface PedidoPieza {
+  id: string;
+  pedido_id: string;
+  instrumental_id: string;
+  caja_id: string | null;
+  cantidad: number;
+}
 export interface Pedido {
   id: string;
   numero: string;
-  cliente: string;
+  cliente: string; // nombre del solicitante
   fecha_pedido: string;
   fecha_compromiso: string | null;
   estado: EstadoPedido;
   notas: string | null;
   entregado_en: string | null;
-  items: PedidoItem[];
+  creado_en: string;
+  origen: "qr" | "interno";
+  token: string;
+  firma_solicitante: string | null;
+  recepcionado_en: string | null;
+  recepcionado_por: string | null;
+  finalizado_en: string | null;
+  finalizado_por: string | null;
+  recibido_por: string | null;
+  recibido_en: string | null;
+  firma_recepcion: string | null;
+  cancelado_en: string | null;
+  cancelado_por: string | null;
+  motivo_cancelacion: string | null;
+  items: PedidoItem[]; // pedidos viejos, por caja completa
+  piezas: PedidoPieza[];
 }
 
 export type Resultado = "conforme" | "observaciones" | "no_conforme";

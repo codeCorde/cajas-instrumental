@@ -271,3 +271,91 @@ export function generarRango(texto: string): string[] | null {
   for (let v = desde; v <= hasta + 1e-9; v += paso) salida.push(`${prefijo}${Number(v.toFixed(decimales))}`);
   return salida;
 }
+
+// ---------------------------------------------------------------------------
+// Piezas terminadas y pedidos por pieza (flujo del QR de pedidos)
+// ---------------------------------------------------------------------------
+
+/**
+ * Piezas terminadas (listas para entregar).
+ *  Simple   → stock terminado.
+ *  Medidas  → sets completos (lo limita la medida que menos hay).
+ *  Complejo → unidades armadas (las piezas sueltas todavía son "stock de partes").
+ */
+export function piezasTerminadas(inst: InstCalc): number {
+  if (inst.tipo === "simple") return inst.stock_terminado;
+  if (inst.tipo === "medidas") return completosConComponentes(inst);
+  return inst.unidades_armadas;
+}
+
+export type EstadoTerminadas = "completa" | "incompleta" | "vacia";
+/** Íconos pedidos en las fotos: círculo verde, cuadrado naranja, cruz roja. */
+export const ESTADO_TERMINADAS_INFO: Record<EstadoTerminadas, { label: string; icono: string }> = {
+  completa: { label: "Completa", icono: "●" },
+  incompleta: { label: "Incompleta", icono: "■" },
+  vacia: { label: "Vacía", icono: "✕" },
+};
+
+/** Caja según las piezas terminadas: completa si alcanza para 1 caja, vacía si no hay ninguna pieza terminada. */
+export function estadoTerminadasCaja(composicion: { inst: InstCalc; cantPorCaja: number }[]): EstadoTerminadas {
+  if (composicion.length === 0) return "vacia";
+  if (composicion.every(({ inst, cantPorCaja }) => piezasTerminadas(inst) >= cantPorCaja)) return "completa";
+  if (composicion.every(({ inst }) => piezasTerminadas(inst) === 0)) return "vacia";
+  return "incompleta";
+}
+
+/** Listado general: suma lo pedido de cada pieza en todas las órdenes (instrumental_id → cantidad). */
+export function listadoGeneral(pedidos: { piezas: { instrumental_id: string; cantidad: number }[] }[]): Record<string, number> {
+  const total: Record<string, number> = {};
+  for (const p of pedidos) for (const it of p.piezas) total[it.instrumental_id] = (total[it.instrumental_id] ?? 0) + it.cantidad;
+  return total;
+}
+
+export interface PlanPedido {
+  ok: boolean;
+  faltantes: string[];
+  descuentos: { etiqueta: string; cantidad: number; hay: number }[];
+}
+
+/**
+ * Qué se descuenta al finalizar ("armar") un pedido. Misma regla que taller.finalizar_pedido (0009).
+ *  Simple → stock terminado · Medidas → cant_por_unidad × cantidad de cada medida · Complejo → unidades armadas.
+ *  Cajas (pedidos viejos por caja) → cajas armadas.
+ */
+export function planFinalizarPedido(
+  piezas: { inst: InstCalc; cantidad: number }[],
+  cajas: { nombre: string; cajas_armadas: number; cantidad: number }[] = [],
+): PlanPedido {
+  const faltantes: string[] = [];
+  const descuentos: PlanPedido["descuentos"] = [];
+  const porInst = new Map<string, { inst: InstCalc; cantidad: number }>();
+  for (const p of piezas) {
+    const t = porInst.get(p.inst.id) ?? { inst: p.inst, cantidad: 0 };
+    t.cantidad += p.cantidad;
+    porInst.set(p.inst.id, t);
+  }
+  if (porInst.size === 0 && cajas.length === 0) return { ok: false, faltantes: ["El pedido no tiene piezas"], descuentos };
+
+  for (const { inst, cantidad } of porInst.values()) {
+    if (inst.tipo === "simple") {
+      if (inst.stock_terminado < cantidad) faltantes.push(`${inst.nombre}: hay ${inst.stock_terminado} terminados de ${cantidad}`);
+      descuentos.push({ etiqueta: inst.nombre, cantidad, hay: inst.stock_terminado });
+    } else if (inst.tipo === "medidas") {
+      const comps = componentesDe(inst);
+      if (comps.length === 0) faltantes.push(`${inst.nombre}: sin medidas cargadas`);
+      for (const c of comps) {
+        const n = c.cant_por_unidad * cantidad;
+        if (c.stock < n) faltantes.push(`${inst.nombre} ${c.codigo_o_medida}: hay ${c.stock} de ${n}`);
+        descuentos.push({ etiqueta: `${inst.nombre} ${c.codigo_o_medida}`, cantidad: n, hay: c.stock });
+      }
+    } else {
+      if (inst.unidades_armadas < cantidad) faltantes.push(`${inst.nombre}: hay ${inst.unidades_armadas} armados de ${cantidad}`);
+      descuentos.push({ etiqueta: `${inst.nombre} (armados)`, cantidad, hay: inst.unidades_armadas });
+    }
+  }
+  for (const c of cajas) {
+    if (c.cajas_armadas < c.cantidad) faltantes.push(`${c.nombre}: hay ${c.cajas_armadas} cajas armadas de ${c.cantidad}`);
+    descuentos.push({ etiqueta: `${c.nombre} (cajas armadas)`, cantidad: c.cantidad, hay: c.cajas_armadas });
+  }
+  return { ok: faltantes.length === 0, faltantes, descuentos };
+}

@@ -1,21 +1,19 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { hoyISO } from "@/lib/formato";
 
 export default async function AdminPage() {
-  const hoy = hoyISO();
-  const [abiertos, vencidos, noConf] = await Promise.all([
+  const [abiertos, porRecepcionar, noConf] = await Promise.all([
     db().from("pedidos").select("id", { count: "exact", head: true }).in("estado", ["pendiente", "en_produccion", "listo"]),
-    db().from("pedidos").select("id", { count: "exact", head: true }).in("estado", ["pendiente", "en_produccion", "listo"]).lt("fecha_compromiso", hoy),
+    db().from("pedidos").select("id", { count: "exact", head: true }).eq("estado", "pendiente"),
     db().from("inspecciones").select("id", { count: "exact", head: true }).eq("resultado", "no_conforme").eq("accion_cerrada", false),
   ]);
   const tarjetas = [
     {
-      href: "/admin/pedidos",
-      titulo: "Pedidos",
-      texto: "Cargá pedidos, seguí qué falta para cumplirlos y registrá las entregas.",
+      href: "/produccion",
+      titulo: "Pedidos y producción",
+      texto: "Pedidos por QR, órdenes de producción, piezas terminadas y entregas firmadas.",
       dato: `${abiertos.count ?? 0} abiertos`,
-      alerta: vencidos.count ? `${vencidos.count} vencidos` : null,
+      alerta: porRecepcionar.count ? `${porRecepcionar.count} por recepcionar` : null,
     },
     {
       href: "/admin/calidad",
