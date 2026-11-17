@@ -23,7 +23,7 @@ jobs:
       - name: Llamar a la app
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-          APP_URL: ${{ vars.APP_URL || 'https://cajas-instrumental-eta.vercel.app' }}
+          APP_URL: ${{ vars.APP_URL || 'https://cajas-instrumental-chi.vercel.app' }}
           PROGRAMA: ${{ github.event.schedule }}
           TIPO_MANUAL: ${{ inputs.tipo }}
         run: |

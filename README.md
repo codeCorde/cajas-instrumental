@@ -4,7 +4,7 @@ App web que reemplaza el Excel de control de producción y stock de **cajas de i
 Repite la estructura y los cálculos del Excel y suma: catálogo único de instrumental con **stock compartido** entre cajas,
 procesos de trabajo y planos, armado de cajas, carga por **QR** desde el taller, pedidos y control de calidad.
 
-Producción: <https://cajas-instrumental-eta.vercel.app> · Repo: <https://github.com/codeCorde/cajas-instrumental>
+Producción: <https://cajas-instrumental-chi.vercel.app> · Repo: <https://github.com/marmaxnetizen/cajas-instrumental>
 
 Stack: **Next.js 15** (App Router, Server Actions) + TypeScript · **Supabase** (Postgres + Storage) · **Tailwind 4** · **Vercel**.
 

@@ -1,7 +1,7 @@
 # CLAUDE.md — guía del proyecto para Claude (y para el equipo)
 
 App web que reemplaza el Excel de control de producción y stock de **cajas de instrumental quirúrgico**.
-Producción: https://cajas-instrumental-eta.vercel.app · Repo: codeCorde/cajas-instrumental
+Producción: https://cajas-instrumental-chi.vercel.app · Repo: marmaxnetizen/cajas-instrumental
 
 ## Stack
 Next.js 15 (App Router, Server Actions) + TypeScript · Supabase (Postgres, Auth, RLS, Storage) · Tailwind 4 · Vercel.
