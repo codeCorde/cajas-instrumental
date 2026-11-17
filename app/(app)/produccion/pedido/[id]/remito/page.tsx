@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cargarCatalogo, leerApariencia } from "@/lib/datos";
-import { pedidoPorId } from "@/lib/pedidos";
+import { nombreLinea, pedidoPorId } from "@/lib/pedidos";
 import { fecha, fechaHora } from "@/lib/formato";
 import BotonImprimir from "@/components/BotonImprimir";
 import MarcaInstrumentARG from "@/components/MarcaInstrumentARG";
@@ -61,7 +61,10 @@ export default async function RemitoPage({ params }: { params: Promise<{ id: str
             {p.piezas.map((x) => (
               <tr key={x.id} className="border-b border-neutral-300">
                 <td className="py-1 font-mono">{x.cantidad}</td>
-                <td className="py-1">{cat.porId.get(x.instrumental_id)?.nombre ?? "Pieza"}</td>
+                <td className="py-1">
+                  {nombreLinea(cat, x.instrumental_id, x.componente_id)}
+                  {x.entregada < x.cantidad && <span className="text-xs"> (entregadas {x.entregada})</span>}
+                </td>
                 <td className="py-1">{cat.cajas.find((c) => c.id === x.caja_id)?.nombre ?? "—"}</td>
               </tr>
             ))}
@@ -77,7 +80,12 @@ export default async function RemitoPage({ params }: { params: Promise<{ id: str
 
         <div className="grid grid-cols-2 gap-8 pt-6">
           <Firma titulo="Firma de quien pidió" nombre={p.cliente} png={p.firma_solicitante} />
-          <Firma titulo="Firma de quien recibió" nombre={p.recibido_por} png={p.firma_recepcion} />
+          {(p.entregas ?? []).length === 0 && <Firma titulo="Firma de quien recibió" nombre={p.recibido_por} png={p.firma_recepcion} />}
+          {[...(p.entregas ?? [])]
+            .sort((a, b) => a.creado_en.localeCompare(b.creado_en))
+            .map((e) => (
+              <Firma key={e.id} titulo={`${e.parcial ? "Entrega parcial" : "Entrega final"} · ${fechaHora(e.creado_en)}`} nombre={e.recibido_por} png={e.firma} />
+            ))}
         </div>
       </article>
     </div>

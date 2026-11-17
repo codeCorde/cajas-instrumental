@@ -1,0 +1,37 @@
+name: Avisos por WhatsApp
+
+# Resumen 6:40 y recordatorios 9:40, 12:40 y 15:40 (hora de Argentina = UTC−3).
+# GitHub puede atrasar unos minutos los horarios programados. Solo corre desde la rama main.
+# Necesita el secreto CRON_SECRET en GitHub (Settings → Secrets and variables → Actions), igual al de Vercel.
+on:
+  schedule:
+    - cron: "40 9 * * *"
+    - cron: "40 12 * * *"
+    - cron: "40 15 * * *"
+    - cron: "40 18 * * *"
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: "resumen o recordatorio"
+        default: resumen
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Llamar a la app
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.APP_URL || 'https://cajas-instrumental-eta.vercel.app' }}
+          PROGRAMA: ${{ github.event.schedule }}
+          TIPO_MANUAL: ${{ inputs.tipo }}
+        run: |
+          case "$PROGRAMA" in
+            "40 9 * * *")  Q="tipo=resumen" ;;
+            "40 12 * * *") Q="tipo=recordatorio&hora=09:40" ;;
+            "40 15 * * *") Q="tipo=recordatorio&hora=12:40" ;;
+            "40 18 * * *") Q="tipo=recordatorio&hora=15:40" ;;
+            *)             Q="tipo=${TIPO_MANUAL:-resumen}&hora=09:40" ;;
+          esac
+          curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/resumen-diario?$Q"

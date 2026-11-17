@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cargarCatalogo, usosDe } from "@/lib/datos";
-import { cargarPedidos } from "@/lib/pedidos";
-import { listadoGeneral, piezasTerminadas, TIPO_LABEL } from "@/lib/calculos";
+import { cargarPedidos, nombreLinea } from "@/lib/pedidos";
+import { listadoGeneral, terminadasLinea, TIPO_LABEL } from "@/lib/calculos";
 import { fecha, fechaHora } from "@/lib/formato";
 import type { Pedido } from "@/lib/tipos";
 import BotonAccion from "@/components/BotonAccion";
@@ -10,7 +10,7 @@ import { recepcionarPedido } from "./acciones";
 
 export const dynamic = "force-dynamic";
 
-const totalPiezas = (p: Pedido) => p.piezas.reduce((s, x) => s + x.cantidad, 0) + p.items.reduce((s, x) => s + x.cantidad, 0);
+const totalPiezas = (p: Pedido) => p.piezas.reduce((s, x) => s + x.cantidad - x.entregada, 0) + p.items.reduce((s, x) => s + x.cantidad, 0);
 
 /**
  * 1 · Órdenes de producción.
@@ -24,8 +24,11 @@ export default async function OrdenesPage({ searchParams }: { searchParams: Prom
   const elegida = ordenes.find((o) => o.id === orden) ?? null;
   const mostrar = elegida ? [elegida] : ordenes;
   const listado = Object.entries(listadoGeneral(mostrar))
-    .map(([id, cantidad]) => ({ inst: cat.porId.get(id), cantidad }))
-    .filter((x): x is { inst: NonNullable<typeof x.inst>; cantidad: number } => !!x.inst)
+    .map(([clave, cantidad]) => {
+      const [id, comp = null] = clave.split("|");
+      return { clave, inst: cat.porId.get(id), comp, cantidad };
+    })
+    .filter((x): x is typeof x & { inst: NonNullable<typeof x.inst> } => !!x.inst)
     .sort((a, b) => a.inst.orden - b.inst.orden || a.inst.codigo.localeCompare(b.inst.codigo, "es", { numeric: true }));
   const cajasPedidas = new Map<string, number>();
   for (const p of mostrar) for (const it of p.items) cajasPedidas.set(it.caja_id, (cajasPedidas.get(it.caja_id) ?? 0) + it.cantidad);
@@ -54,7 +57,7 @@ export default async function OrdenesPage({ searchParams }: { searchParams: Prom
                   <span className="rounded-full bg-superficie-2 px-2 py-0.5 text-xs font-semibold">{totalPiezas(p)} piezas</span>
                 </div>
                 <p className="text-sm text-tenue">
-                  {p.piezas.map((x) => `${x.cantidad} × ${cat.porId.get(x.instrumental_id)?.nombre ?? "?"}`).join(" · ")}
+                  {p.piezas.map((x) => `${x.cantidad} × ${nombreLinea(cat, x.instrumental_id, x.componente_id)}`).join(" · ")}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <BotonAccion accion={recepcionarPedido.bind(null, p.id)} className="btn btn-primario">
@@ -124,25 +127,25 @@ export default async function OrdenesPage({ searchParams }: { searchParams: Prom
                   <tr>
                     <th>Pieza</th>
                     <th>Tipo</th>
-                    <th className="text-right">Pedidas</th>
+                    <th className="text-right">Falta entregar</th>
                     <th className="text-right">Terminadas</th>
                     <th className="text-right">Faltan</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {listado.map(({ inst, cantidad }) => {
-                    const hay = piezasTerminadas(inst);
+                  {listado.map(({ clave, inst, comp, cantidad }) => {
+                    const hay = terminadasLinea(inst, comp);
                     const faltan = Math.max(0, cantidad - hay);
                     return (
-                      <tr key={inst.id}>
+                      <tr key={clave}>
                         <td>
                           <Link href={`/produccion/partes?pieza=${inst.id}`} className="font-semibold hover:underline">
-                            {inst.nombre}
+                            {nombreLinea(cat, inst.id, comp)}
                           </Link>{" "}
                           <Compartido cajas={usosDe(cat, inst.id).map((u) => u.caja.codigo)} />
                           <span className="block font-mono text-xs text-tenue">{inst.codigo}</span>
                         </td>
-                        <td className="text-sm">{TIPO_LABEL[inst.tipo]}</td>
+                        <td className="text-sm">{comp ? "Medida suelta" : TIPO_LABEL[inst.tipo]}</td>
                         <td className="text-right font-mono font-semibold">{cantidad}</td>
                         <td className="text-right font-mono">{hay}</td>
                         <td className={`text-right font-mono font-semibold ${faltan === 0 ? "text-disponible" : "text-falta"}`}>{faltan === 0 ? "✓ 0" : `✕ ${faltan}`}</td>

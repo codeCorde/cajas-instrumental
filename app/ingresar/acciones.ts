@@ -47,19 +47,36 @@ export async function elegirNombre(fd: FormData) {
   const nuevo = String(fd.get("nuevo") ?? "").trim().replace(/\s+/g, " ").slice(0, 40);
   let nombre = String(fd.get("nombre") ?? "").trim();
 
-  if (nuevo) {
-    const { data: existe } = await db().from("personas").select("id, nombre, activa").ilike("nombre", nuevo).maybeSingle();
+  // El taller es privado: solo se puede elegir a una persona HABILITADA (invitada). Un nombre nuevo solo se acepta
+  // la primera vez, cuando todavía no hay nadie habilitado (para que el dueño pueda entrar y mandar las invitaciones).
+  const { count: habilitadas } = await db().from("personas").select("id", { count: "exact", head: true }).eq("activa", true);
+  if (nuevo && (habilitadas ?? 0) === 0) {
+    const { data: existe } = await db().from("personas").select("id, nombre").ilike("nombre", nuevo).maybeSingle();
     if (existe) {
       nombre = existe.nombre;
-      if (!existe.activa) await db().from("personas").update({ activa: true }).eq("id", existe.id);
+      await db().from("personas").update({ activa: true }).eq("id", existe.id);
     } else {
       const { error } = await db().from("personas").insert({ nombre: nuevo });
       if (error) throw new Error(error.message);
       nombre = nuevo;
     }
+  } else if (nombre) {
+    const { data: p } = await db().from("personas").select("nombre, activa").eq("nombre", nombre).maybeSingle();
+    if (!p?.activa) nombre = "";
   }
   if (!nombre) redirect(`/ingresar/nombre?volver=${encodeURIComponent(volver)}&error=1`);
 
   jar.set(COOKIE_SESION, await firmarSesion({ nombre }), opcionesCookie);
   redirect(volver);
+}
+
+/** Acepta un link de invitación: habilita a la persona y la deja adentro (sin contraseña, en este equipo). */
+export async function aceptarInvitacion(fd: FormData) {
+  const token = String(fd.get("token") ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(token)) redirect("/ingresar");
+  const { data, error } = await db().rpc("aceptar_invitacion", { p_token: token });
+  if (error || !data) redirect(`/ingresar/invitacion/${token}`);
+  await db().from("novedades").insert({ autor: String(data), origen: "app", seccion: "acceso", titulo: `${data} aceptó la invitación al taller` });
+  (await cookies()).set(COOKIE_SESION, await firmarSesion({ nombre: String(data) }), opcionesCookie);
+  redirect("/");
 }

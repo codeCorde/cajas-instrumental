@@ -13,7 +13,7 @@ export default async function NombrePage({ searchParams }: { searchParams: Promi
       <div className="w-full max-w-md">
         <p className="font-mono text-xs uppercase tracking-widest text-tenue mb-1">{sesion?.nombre ? "Cambiar de persona" : "Paso 2 de 2"}</p>
         <h1 className="titulo text-4xl mb-2">¿Quién sos?</h1>
-        <p className="text-sm text-tenue mb-5">Tu nombre queda registrado en cada carga de stock. Lo podés cambiar después desde el menú.</p>
+        <p className="text-sm text-tenue mb-5">Tu nombre queda registrado en cada carga de stock. Solo aparecen las personas habilitadas.</p>
         <form action={elegirNombre} className="card p-5 space-y-5">
           <input type="hidden" name="volver" value={volver} />
           {personas.length > 0 && (
@@ -28,16 +28,20 @@ export default async function NombrePage({ searchParams }: { searchParams: Promi
               </div>
             </fieldset>
           )}
+          {personas.length > 0 ? (
+            <p className="text-sm text-tenue">¿No estás en la lista? El taller es privado: pedile una invitación a quien lo administra.</p>
+          ) : (
           <label className="block">
-            <span className="etiqueta">{personas.length ? "¿No estás en la lista? Escribí tu nombre" : "Escribí tu nombre"}</span>
+            <span className="etiqueta">Primera vez: escribí tu nombre (vas a ser el administrador)</span>
             <span className="flex gap-2">
               <input name="nuevo" className="campo" maxLength={40} autoComplete="name" placeholder="Ej.: Juan" />
               <button className="btn btn-primario shrink-0">Seguir</button>
             </span>
           </label>
+          )}
           {error && (
             <p role="alert" className="text-sm text-falta">
-              ✕ Elegí o escribí un nombre.
+              ✕ Elegí tu nombre de la lista.
             </p>
           )}
         </form>

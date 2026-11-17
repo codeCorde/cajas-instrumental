@@ -41,6 +41,7 @@ await db.exec(leer("supabase/migrations/0007_taller.sql")); console.log("ok    0
 await db.exec(leer("supabase/migrations/0008_taller_datos.sql")); console.log("ok    0008_taller_datos.sql");
 await err(leer("supabase/migrations/0008_taller_datos.sql"), "0008 no se puede correr dos veces");
 await db.exec(leer("supabase/migrations/0009_pedidos_qr_y_ordenes.sql")); console.log("ok    0009_pedidos_qr_y_ordenes.sql");
+await db.exec(leer("supabase/migrations/0010_sets_y_entrega_parcial.sql")); console.log("ok    0010_sets_y_entrega_parcial.sql");
 
 // ---------- datos iniciales ----------
 ok((await q1(`select count(*)::int n from taller.cajas`)).n === 3, "3 cajas");
@@ -65,6 +66,9 @@ await err(`select * from taller.instrumentales`, "authenticated tampoco");
 await err(`select taller.ajustar_stock('stock', gen_random_uuid(), 1, 'x')`, "authenticated no ejecuta RPC");
 await err(`select * from taller.pedido_piezas`, "authenticated no lee las piezas pedidas");
 await err(`select taller.crear_pedido('x', '[]'::jsonb)`, "authenticated no crea pedidos");
+await err(`select * from taller.entregas`, "authenticated no lee las entregas");
+await err(`select * from taller.invitaciones`, "authenticated no lee las invitaciones");
+await err(`select taller.entregar_parcial(gen_random_uuid(), 'x', '[]'::jsonb, 'x', 'x')`, "authenticated no entrega");
 await db.exec(`reset role; set role service_role;`);
 
 // ---------- RPC ----------
@@ -190,5 +194,76 @@ ok(f3.r.ok === false && /cajas armadas/.test(f3.r.faltantes[0]), "pedido por caj
 ok(/^OP-\d{4}$/.test(p3.numero), "los pedidos cargados a mano también reciben número");
 await err(`insert into taller.movimientos (autor, campo, delta, stock_resultante, motivo) values ('x','stock',1,1,'otro')`, "motivo inventado no entra al historial");
 
+{
+// ---------- 0010: sets personalizados, entrega parcial, cancelación ----------
+// Stock de partida para este bloque: S, M (Ø44 cant 1, Ø46 cant 2), C (armados)
+const stockDe = async () => q1(`select (select stock_terminado from taller.instrumentales where id='${s}') s, (select stock from taller.componentes where id='${ma}') ma,
+  (select stock from taller.componentes where id='${mb}') mb, (select unidades_armadas from taller.instrumentales where id='${c}') ua`);
+const st0 = await stockDe();
+await db.exec(`select taller.ajustar_stock('stock_terminado','${s}',${5 - st0.s},'Ana') where ${5 - st0.s} <> 0;
+  select taller.ajustar_stock('stock','${ma}',${4 - st0.ma},'Ana') where ${4 - st0.ma} <> 0;
+  select taller.ajustar_stock('stock','${mb}',${8 - st0.mb},'Ana') where ${8 - st0.mb} <> 0;
+  select taller.ajustar_stock('unidades_armadas','${c}',${3 - st0.ua},'Ana') where ${3 - st0.ua} <> 0;`);
+ok(JSON.stringify(await stockDe()) === JSON.stringify({ s: 5, ma: 4, mb: 8, ua: 3 }), "stock de partida 0010: S=5 · Ø44=4 · Ø46=8 · C=3");
+
+// Set personalizado: solo Ø46 ×1 (no el set entero)
+await err(`select taller.crear_pedido('Paola', '[{"instrumental_id":"${m}","componente_id":"${pa}","cantidad":1}]'::jsonb)`, "una medida de otro instrumental -> error");
+const items2 = JSON.stringify([{ instrumental_id: m, componente_id: mb, cantidad: 1 }, { instrumental_id: s, cantidad: 3 }, { instrumental_id: c, cantidad: 2 }]);
+const q = (await q1(`select taller.crear_pedido('Paola', '${items2}'::jsonb, 'qr', '${firma}') r`)).r;
+const piezasQ = await filas(`select id, instrumental_id, componente_id, cantidad, entregada from taller.pedido_piezas where pedido_id='${q.id}'`);
+ok(piezasQ.length === 3 && piezasQ.some((x) => x.componente_id === mb), "guarda la medida suelta del set personalizado");
+await db.exec(`update taller.pedidos set estado='en_produccion' where id='${q.id}'`);
+const pzS = piezasQ.find((x) => x.instrumental_id === s).id;
+const pzM = piezasQ.find((x) => x.instrumental_id === m).id;
+const pzC = piezasQ.find((x) => x.instrumental_id === c).id;
+
+// Entrega parcial: 2 de S y la medida Ø46
+await err(`select taller.entregar_parcial('${q.id}','Ana','[{"pieza_id":"${pzS}","cantidad":4}]'::jsonb,'Paola','${firma}')`, "no se entrega más de lo pedido");
+await err(`select taller.entregar_parcial('${q.id}','Ana','[{"pieza_id":"${pzS}","cantidad":1}]'::jsonb,'Paola','')`, "parcial sin firma -> error");
+const e1 = await q1(`select taller.entregar_parcial('${q.id}','Ana','[{"pieza_id":"${pzS}","cantidad":2},{"pieza_id":"${pzM}","cantidad":1}]'::jsonb,'Paola','${firma}') r`);
+ok(e1.r.ok === true && e1.r.completo === false, "entrega parcial hecha, el pedido sigue abierto");
+const st1 = await stockDe();
+ok(st1.s === 3 && st1.mb === 6 && st1.ma === 4 && st1.ua === 3, `el parcial descontó S×2 y Ø46×2 (cant 2), no tocó Ø44 ${JSON.stringify(st1)}`);
+const ent = await q1(`select count(*)::int n, bool_and(parcial) p from taller.entregas where pedido_id='${q.id}'`);
+ok(ent.n === 1 && ent.p === true, "quedó registrada la entrega parcial");
+ok((await q1(`select entregada n from taller.pedido_piezas where id='${pzS}'`)).n === 2, "la pieza S tiene 2 entregadas");
+// Finalizar lo que falta: 1 S + 2 C
+ok((await q1(`select taller.finalizar_pedido('${q.id}','Ana') r`)).r.ok === true, "finaliza solo lo que faltaba entregar");
+const st2 = await stockDe();
+ok(st2.s === 2 && st2.ua === 1 && st2.mb === 6, `descontó 1 S y 2 armados ${JSON.stringify(st2)}`);
+// Cancelar un finalizado con parcial: devuelve solo lo no entregado
+await db.exec(`select taller.cancelar_pedido('${q.id}','Ana','El taller lo cancela por olvido del solicitante')`);
+const st3 = await stockDe();
+ok(st3.s === 3 && st3.ua === 3 && st3.mb === 6, `la cancelación devolvió 1 S y 2 C; lo entregado en el parcial no vuelve ${JSON.stringify(st3)}`);
+ok((await q1(`select estado from taller.pedidos where id='${q.id}'`)).estado === "cancelado", "queda registrado como cancelado");
+
+// Parcial que completa todo el pedido → entregado
+const items3 = JSON.stringify([{ instrumental_id: s, cantidad: 1 }]);
+const w = (await q1(`select taller.crear_pedido('Laura', '${items3}'::jsonb, 'interno') r`)).r;
+await db.exec(`update taller.pedidos set estado='en_produccion' where id='${w.id}'`);
+const pzW = (await q1(`select id from taller.pedido_piezas where pedido_id='${w.id}'`)).id;
+const e2 = await q1(`select taller.entregar_parcial('${w.id}','Ana','[{"pieza_id":"${pzW}","cantidad":1}]'::jsonb,'Laura','${firma}') r`);
+const pw = await q1(`select estado, recibido_por from taller.pedidos where id='${w.id}'`);
+ok(e2.r.completo === true && pw.estado === "entregado" && pw.recibido_por === "Laura", "si el parcial completa el pedido, queda entregado");
+
+// Set entero sin medidas cargadas → faltante claro
+const sinMed = (await q1(`insert into taller.instrumentales (codigo, nombre, tipo) values ('P-4','Raspas','medidas') returning id`)).id;
+const z = (await q1(`select taller.crear_pedido('Laura', '[{"instrumental_id":"${sinMed}","cantidad":1}]'::jsonb) r`)).r;
+await db.exec(`update taller.pedidos set estado='en_produccion' where id='${z.id}'`);
+const fz = await q1(`select taller.finalizar_pedido('${z.id}','Ana') r`);
+ok(fz.r.ok === false && fz.r.faltantes[0] === "Raspas: sin medidas cargadas", "set sin medidas: avisa «sin medidas cargadas»");
+
+}
+{
+// ---------- 0010: invitaciones ----------
+const inv = (await q1(`insert into taller.invitaciones (nombre, creada_por) values ('Socio','Max') returning token`)).token;
+ok((await q1(`select taller.aceptar_invitacion('${inv}') n`)).n === "Socio", "la invitación habilita a la persona");
+ok((await q1(`select activa from taller.personas where nombre='Socio'`)).activa === true, "…y queda activa");
+await err(`select taller.aceptar_invitacion('${inv}')`, "una invitación no se usa dos veces");
+const vieja = (await q1(`insert into taller.invitaciones (nombre, creada_por, vence_en) values ('Otro','Max', now() - interval '1 day') returning token`)).token;
+await err(`select taller.aceptar_invitacion('${vieja}')`, "una invitación vencida no sirve");
+await err(`select taller.aceptar_invitacion(gen_random_uuid())`, "un token inventado no sirve");
+ok(((await q1(`select valor->>'clave' k from taller.config where clave='pedir'`)).k ?? "").length === 32, "el QR de pedidos tiene clave secreta");
+}
 console.log(fallas ? `\n${fallas} FALLAS` : "\nTODO OK");
 process.exit(fallas ? 1 : 0);

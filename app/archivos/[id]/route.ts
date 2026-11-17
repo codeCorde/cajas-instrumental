@@ -3,8 +3,10 @@
 import { NextResponse } from "next/server";
 import { BUCKET, db } from "@/lib/db";
 import { leerApariencia } from "@/lib/datos";
+import { quienSoy } from "@/lib/sesion-servidor";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  await quienSoy(); // el taller es privado: también corta a las personas desactivadas
   const { id } = await params;
   const descargar = new URL(req.url).searchParams.has("descargar");
   let ruta: string | null = null;

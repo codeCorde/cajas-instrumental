@@ -5,6 +5,7 @@ import type { PlantillaCalidad } from "@/lib/tipos";
 import FormAccion from "@/components/FormAccion";
 import BotonAccion from "@/components/BotonAccion";
 import SubirLogo from "./SubirLogo";
+import Invitaciones from "./Invitaciones";
 import { activarPersona, agregarPersona, borrarPlantilla, guardarApariencia, guardarMotivos, guardarPlantilla, renombrarPersona } from "./acciones";
 
 export default async function ConfigPage() {
@@ -54,7 +55,7 @@ export default async function ConfigPage() {
 
       <section className="card p-4 space-y-4">
         <h2 className="titulo text-2xl">Personas</h2>
-        <p className="text-sm text-tenue">Los nombres que aparecen al ingresar. Si desactivás a alguien, deja de aparecer en la lista pero su historial se conserva.</p>
+        <p className="text-sm text-tenue">Las personas habilitadas para entrar al taller. Si desactivás a alguien, pierde el acceso al instante (su historial se conserva).</p>
         <ul className="divide-y divide-borde">
           {personas.map((p) => (
             <li key={p.id} className="py-2 flex flex-wrap items-center gap-2">
@@ -71,6 +72,8 @@ export default async function ConfigPage() {
           <input name="nombre" className="campo" placeholder="Nombre" required aria-label="Nombre de la persona nueva" />
         </FormAccion>
       </section>
+
+      <Invitaciones />
 
       <section className="card p-4 space-y-4">
         <h2 className="titulo text-2xl">Conformidades</h2>

@@ -6,12 +6,15 @@ import FirmaPad from "@/components/FirmaPad";
 import { crearPedidoQR } from "./acciones";
 
 type Etapa = "intro" | "cajas" | "caja" | "resumen" | "datos" | "listo";
-type Linea = { cajaId: string; instId: string; cantidad: number };
-type Carrito = Record<string, Linea>; // clave `${cajaId}:${instId}`
+/** Una línea del pedido: una pieza (o un set entero), o una medida suelta de un set personalizado. */
+type Linea = { cajaId: string; instId: string; compId: string | null; cantidad: number };
+type Carrito = Record<string, Linea>;
+type Pieza = CajaParaPedir["piezas"][number];
 
-const CLAVE_CARRITO = "pedido-instrumentarg";
+const CLAVE_CARRITO = "pedido-instrumentarg-v2";
 const DURACION_INTRO = 5000;
-const clave = (cajaId: string, instId: string) => `${cajaId}:${instId}`;
+const clave = (cajaId: string, instId: string, compId: string | null) => `${cajaId}:${instId}:${compId ?? ""}`;
+const limitar = (n: number) => Math.max(0, Math.min(9999, Math.trunc(n) || 0));
 
 function leerCarrito(): Carrito {
   try {
@@ -29,7 +32,23 @@ function guardarCarrito(c: Carrito) {
   }
 }
 
-export default function PedirApp({ cajas }: { cajas: CajaParaPedir[] }) {
+/** Lo elegido en una caja: cantidad por pieza y, para los sets, las medidas que se sacan. */
+type Eleccion = { cant: Record<string, number>; sacar: Record<string, string[]> };
+
+/** Pasa lo elegido a líneas: set entero si no se sacó ninguna medida; si se sacaron, una línea por cada medida que queda. */
+function lineasDe(caja: CajaParaPedir, e: Eleccion): Linea[] {
+  const out: Linea[] = [];
+  for (const p of caja.piezas) {
+    const n = e.cant[p.id] ?? 0;
+    if (n <= 0) continue;
+    const sacadas = e.sacar[p.id] ?? [];
+    if (p.medidas.length === 0 || sacadas.length === 0) out.push({ cajaId: caja.id, instId: p.id, compId: null, cantidad: n });
+    else for (const m of p.medidas) if (!sacadas.includes(m.id)) out.push({ cajaId: caja.id, instId: p.id, compId: m.id, cantidad: n });
+  }
+  return out;
+}
+
+export default function PedirApp({ cajas, claveQR }: { cajas: CajaParaPedir[]; claveQR: string | null }) {
   const [etapa, setEtapa] = useState<Etapa>("intro");
   const [cajaId, setCajaId] = useState<string | null>(null);
   const [carrito, setCarrito] = useState<Carrito>({});
@@ -61,14 +80,13 @@ export default function PedirApp({ cajas }: { cajas: CajaParaPedir[] }) {
   const totalPiezas = lineas.reduce((s, l) => s + l.cantidad, 0);
   const caja = cajas.find((c) => c.id === cajaId) ?? null;
 
-  function sumarAlCarrito(cantidades: Record<string, number>): number {
+  function sumarAlCarrito(nuevas: Linea[]): number {
     const nuevo = { ...carrito };
     let agregadas = 0;
-    for (const [instId, n] of Object.entries(cantidades)) {
-      if (!caja || n <= 0) continue;
-      const k = clave(caja.id, instId);
-      nuevo[k] = { cajaId: caja.id, instId, cantidad: (nuevo[k]?.cantidad ?? 0) + n };
-      agregadas += n;
+    for (const l of nuevas) {
+      const k = clave(l.cajaId, l.instId, l.compId);
+      nuevo[k] = { ...l, cantidad: (nuevo[k]?.cantidad ?? 0) + l.cantidad };
+      agregadas += l.cantidad;
     }
     cambiarCarrito(nuevo);
     return agregadas;
@@ -81,11 +99,7 @@ export default function PedirApp({ cajas }: { cajas: CajaParaPedir[] }) {
       <header className="sticky top-0 z-30 bg-superficie border-b border-borde">
         <div className="mx-auto max-w-xl px-4 h-14 flex items-center gap-3">
           {etapa !== "cajas" && etapa !== "listo" ? (
-            <button
-              type="button"
-              className="btn px-3"
-              onClick={() => setEtapa(etapa === "caja" || etapa === "resumen" ? "cajas" : etapa === "datos" ? "resumen" : "cajas")}
-            >
+            <button type="button" className="btn px-3" onClick={() => setEtapa(etapa === "datos" ? "resumen" : "cajas")}>
               ← Atrás
             </button>
           ) : (
@@ -115,29 +129,22 @@ export default function PedirApp({ cajas }: { cajas: CajaParaPedir[] }) {
             caja={caja}
             numero={cajas.indexOf(caja) + 1}
             carrito={carrito}
-            onAgregar={(cant) => {
-              const n = sumarAlCarrito(cant);
+            onAgregar={(e) => {
+              const n = sumarAlCarrito(lineasDe(caja, e));
               setAviso(n > 0 ? `✓ Agregaste ${n} ${n === 1 ? "pieza" : "piezas"} al pedido` : "Elegí al menos una pieza (cantidad mayor a 0).");
               if (n > 0) setEtapa("cajas");
             }}
-            onFinalizar={(cant) => {
-              sumarAlCarrito(cant);
+            onFinalizar={(e) => {
+              sumarAlCarrito(lineasDe(caja, e));
               setEtapa("resumen");
             }}
           />
         )}
-        {etapa === "resumen" && (
-          <Resumen
-            cajas={cajas}
-            carrito={carrito}
-            onCambiar={cambiarCarrito}
-            onSeguir={() => setEtapa("cajas")}
-            onCompleto={() => setEtapa("datos")}
-          />
-        )}
+        {etapa === "resumen" && <Resumen cajas={cajas} carrito={carrito} onCambiar={cambiarCarrito} onSeguir={() => setEtapa("cajas")} onCompleto={() => setEtapa("datos")} />}
         {etapa === "datos" && (
           <Datos
             lineas={lineas}
+            claveQR={claveQR}
             onListo={(r) => {
               setResultado(r);
               cambiarCarrito({});
@@ -228,15 +235,24 @@ function PiezasDeCaja({
   caja: CajaParaPedir;
   numero: number;
   carrito: Carrito;
-  onAgregar: (c: Record<string, number>) => void;
-  onFinalizar: (c: Record<string, number>) => void;
+  onAgregar: (e: Eleccion) => void;
+  onFinalizar: (e: Eleccion) => void;
 }) {
   const [cant, setCant] = useState<Record<string, number>>({});
+  const [sacar, setSacar] = useState<Record<string, string[]>>({});
+  const [abierto, setAbierto] = useState<string | null>(null);
   const elegidas = Object.values(cant).reduce((s, n) => s + n, 0);
   const enCarrito = Object.values(carrito).some((l) => l.cantidad > 0);
-  const limitar = (n: number) => Math.max(0, Math.min(9999, Math.trunc(n) || 0));
   const poner = (id: string, n: number) => setCant((c) => ({ ...c, [id]: limitar(n) }));
   const sumar = (id: string, d: number) => setCant((c) => ({ ...c, [id]: limitar((c[id] ?? 0) + d) }));
+  const alternarMedida = (p: Pieza, medidaId: string) =>
+    setSacar((s) => {
+      const actual = s[p.id] ?? [];
+      const nuevo = actual.includes(medidaId) ? actual.filter((x) => x !== medidaId) : [...actual, medidaId];
+      if (nuevo.length >= p.medidas.length) return s; // al menos una medida tiene que quedar
+      return { ...s, [p.id]: nuevo };
+    });
+  const eleccion: Eleccion = { cant, sacar };
 
   return (
     <section className="space-y-4">
@@ -253,41 +269,68 @@ function PiezasDeCaja({
       {caja.piezas.length === 0 && <p className="card p-5 text-tenue">Esta caja todavía no tiene piezas cargadas.</p>}
       <ul className="space-y-2">
         {caja.piezas.map((p, i) => {
-          const ya = carrito[clave(caja.id, p.id)]?.cantidad ?? 0;
+          const ya = Object.values(carrito)
+            .filter((l) => l.cajaId === caja.id && l.instId === p.id)
+            .reduce((s, l) => s + l.cantidad, 0);
           const n = cant[p.id] ?? 0;
+          const sacadas = sacar[p.id] ?? [];
           return (
-            <li key={p.id} className={`card p-3 flex items-center gap-3 ${n > 0 ? "border-acento" : ""}`}>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold leading-tight">
-                  <span className="font-mono text-tenue mr-1">
-                    {numero}.{i + 1}
-                  </span>
-                  {p.nombre}
-                </p>
-                <p className="text-xs text-tenue">
-                  {TIPO_TEXTO[p.tipo] ?? p.tipo}
-                  {p.alias ? ` · ${p.alias}` : ""}
-                </p>
-                {ya > 0 && <p className="text-xs font-semibold text-disponible">✓ Ya tenés {ya} en el pedido</p>}
+            <li key={p.id} className={`card p-3 space-y-2 ${n > 0 ? "border-acento" : ""}`}>
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold leading-tight">
+                    <span className="font-mono text-tenue mr-1">
+                      {numero}.{i + 1}
+                    </span>
+                    {p.nombre}
+                  </p>
+                  <p className="text-xs text-tenue">
+                    {TIPO_TEXTO[p.tipo] ?? p.tipo}
+                    {p.medidas.length > 0 && (sacadas.length ? ` · ${p.medidas.length - sacadas.length} de ${p.medidas.length} medidas` : ` · ${p.medidas.length} medidas`)}
+                    {p.alias ? ` · ${p.alias}` : ""}
+                  </p>
+                  {ya > 0 && <p className="text-xs font-semibold text-disponible">✓ Ya tenés {ya} en el pedido</p>}
+                </div>
+                <div className="flex flex-col items-center gap-1" role="group" aria-label={`Cantidad de ${p.nombre}`}>
+                  <button type="button" className="btn w-14 h-11 px-0 text-xl" onClick={() => sumar(p.id, 1)} aria-label={`Sumar 1 a ${p.nombre}`}>
+                    ▲
+                  </button>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={n}
+                    onChange={(e) => poner(p.id, Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    className="campo w-14 text-center font-mono text-lg px-1 min-h-11"
+                    aria-label={`Cantidad de ${p.nombre}`}
+                  />
+                  <button type="button" className="btn w-14 h-11 px-0 text-xl" onClick={() => sumar(p.id, -1)} disabled={n <= 0} aria-label={`Restar 1 a ${p.nombre}`}>
+                    ▼
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-col items-center gap-1" role="group" aria-label={`Cantidad de ${p.nombre}`}>
-                <button type="button" className="btn w-14 h-11 px-0 text-xl" onClick={() => sumar(p.id, 1)} aria-label={`Sumar 1 a ${p.nombre}`}>
-                  ▲
-                </button>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={n}
-                  onChange={(e) => poner(p.id, Number(e.target.value))}
-                  onFocus={(e) => e.target.select()}
-                  className="campo w-14 text-center font-mono text-lg px-1 min-h-11"
-                  aria-label={`Cantidad de ${p.nombre}`}
-                />
-                <button type="button" className="btn w-14 h-11 px-0 text-xl" onClick={() => sumar(p.id, -1)} disabled={n <= 0} aria-label={`Restar 1 a ${p.nombre}`}>
-                  ▼
-                </button>
-              </div>
+              {p.medidas.length > 1 && (
+                <div>
+                  <button type="button" className="text-sm underline text-acento" aria-expanded={abierto === p.id} onClick={() => setAbierto(abierto === p.id ? null : p.id)}>
+                    {abierto === p.id ? "Listo, cerrar" : "Personalizar el set (sacar medidas)"}
+                  </button>
+                  {abierto === p.id && (
+                    <fieldset className="mt-2 grid grid-cols-3 gap-2">
+                      <legend className="sr-only">Medidas de {p.nombre}</legend>
+                      {p.medidas.map((m) => {
+                        const va = !sacadas.includes(m.id);
+                        return (
+                          <label key={m.id} className={`btn min-h-11 px-2 text-sm font-mono ${va ? "border-acento" : "line-through opacity-60"}`}>
+                            <input type="checkbox" className="sr-only" checked={va} onChange={() => alternarMedida(p, m.id)} />
+                            <span aria-hidden="true">{va ? "✓" : "✕"}</span> {m.nombre}
+                          </label>
+                        );
+                      })}
+                    </fieldset>
+                  )}
+                </div>
+              )}
             </li>
           );
         })}
@@ -295,10 +338,10 @@ function PiezasDeCaja({
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-borde bg-superficie">
         <div className="mx-auto max-w-xl px-4 py-3 grid grid-cols-2 gap-2">
-          <button type="button" className="btn min-h-14 text-base" onClick={() => onAgregar(cant)} disabled={elegidas === 0}>
+          <button type="button" className="btn min-h-14 text-base" onClick={() => onAgregar(eleccion)} disabled={elegidas === 0}>
             + Agregar al pedido
           </button>
-          <button type="button" className="btn btn-primario min-h-14 text-base" onClick={() => onFinalizar(cant)} disabled={elegidas === 0 && !enCarrito}>
+          <button type="button" className="btn btn-primario min-h-14 text-base" onClick={() => onFinalizar(eleccion)} disabled={elegidas === 0 && !enCarrito}>
             Finalizar pedido →
           </button>
         </div>
@@ -323,7 +366,16 @@ function Resumen({
   const grupos = useMemo(
     () =>
       cajas
-        .map((c) => ({ caja: c, lineas: c.piezas.map((p) => ({ p, l: carrito[clave(c.id, p.id)] })).filter((x) => x.l && x.l.cantidad > 0) }))
+        .map((c) => ({
+          caja: c,
+          lineas: Object.entries(carrito)
+            .filter(([, l]) => l.cajaId === c.id && l.cantidad > 0)
+            .map(([k, l]) => {
+              const p = c.piezas.find((x) => x.id === l.instId);
+              const medida = l.compId ? p?.medidas.find((m) => m.id === l.compId)?.nombre : null;
+              return { k, l, nombre: `${p?.nombre ?? "Pieza"}${medida ? ` ${medida}` : p?.medidas.length ? " (set completo)" : ""}` };
+            }),
+        }))
         .filter((g) => g.lineas.length > 0),
     [cajas, carrito],
   );
@@ -343,24 +395,21 @@ function Resumen({
         <div key={caja.id} className="card p-4 space-y-2">
           <h2 className="titulo text-xl">{caja.nombre}</h2>
           <ul className="divide-y divide-borde">
-            {lineas.map(({ p, l }) => {
-              const k = clave(caja.id, p.id);
-              return (
-                <li key={p.id} className="py-2 flex items-center gap-2">
-                  <span className="flex-1 min-w-0">{p.nombre}</span>
-                  <button type="button" className="btn w-11 px-0" onClick={() => poner(k, l!.cantidad - 1)} aria-label={`Restar 1 a ${p.nombre}`}>
-                    −
-                  </button>
-                  <span className="font-mono text-lg w-10 text-center">{l!.cantidad}</span>
-                  <button type="button" className="btn w-11 px-0" onClick={() => poner(k, l!.cantidad + 1)} aria-label={`Sumar 1 a ${p.nombre}`}>
-                    +
-                  </button>
-                  <button type="button" className="btn w-11 px-0 btn-peligro" onClick={() => poner(k, 0)} aria-label={`Quitar ${p.nombre}`}>
-                    ✕
-                  </button>
-                </li>
-              );
-            })}
+            {lineas.map(({ k, l, nombre }) => (
+              <li key={k} className="py-2 flex items-center gap-2">
+                <span className="flex-1 min-w-0">{nombre}</span>
+                <button type="button" className="btn w-11 px-0" onClick={() => poner(k, l.cantidad - 1)} aria-label={`Restar 1 a ${nombre}`}>
+                  −
+                </button>
+                <span className="font-mono text-lg w-10 text-center">{l.cantidad}</span>
+                <button type="button" className="btn w-11 px-0" onClick={() => poner(k, l.cantidad + 1)} aria-label={`Sumar 1 a ${nombre}`}>
+                  +
+                </button>
+                <button type="button" className="btn w-11 px-0 btn-peligro" onClick={() => poner(k, 0)} aria-label={`Quitar ${nombre}`}>
+                  ✕
+                </button>
+              </li>
+            ))}
           </ul>
         </div>
       ))}
@@ -378,7 +427,7 @@ function Resumen({
   );
 }
 
-function Datos({ lineas, onListo }: { lineas: Linea[]; onListo: (r: { numero: string; token: string }) => void }) {
+function Datos({ lineas, claveQR, onListo }: { lineas: Linea[]; claveQR: string | null; onListo: (r: { numero: string; token: string }) => void }) {
   const [nombre, setNombre] = useState("");
   const [firma, setFirma] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -391,7 +440,12 @@ function Datos({ lineas, onListo }: { lineas: Linea[]; onListo: (r: { numero: st
     if (!firma) return setError("Falta tu firma.");
     setError(null);
     iniciar(async () => {
-      const r = await crearPedidoQR({ nombre, firma, items: lineas.map((l) => ({ instrumental_id: l.instId, caja_id: l.cajaId, cantidad: l.cantidad })) });
+      const r = await crearPedidoQR({
+        clave: claveQR,
+        nombre,
+        firma,
+        items: lineas.map((l) => ({ instrumental_id: l.instId, caja_id: l.cajaId, componente_id: l.compId, cantidad: l.cantidad })),
+      });
       if (r.ok) onListo({ numero: r.numero, token: r.token });
       else setError(r.error);
     });

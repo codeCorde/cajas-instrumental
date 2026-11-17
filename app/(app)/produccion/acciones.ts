@@ -125,3 +125,22 @@ export async function probarAvisos(): Promise<ResultadoAccion> {
     if (errores.length) throw new Error(`Algunos avisos fallaron: ${errores.join(" · ")}`);
   });
 }
+
+/** Entrega parcial: piezas y cantidades elegidas + firma de quien recibe (en el celular del dueño). Descuenta terminadas. */
+export async function entregarParcial(id: string, datos: { items: { pieza_id: string; cantidad: number }[]; recibio: string; firma: string }): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    if (!datos.firma?.startsWith("data:image/png;base64,") || datos.firma.length > 350_000) throw new Error("Falta la firma (o es demasiado grande).");
+    const items = (datos.items ?? []).filter((i) => /^[0-9a-f-]{36}$/i.test(i.pieza_id) && Number.isInteger(i.cantidad) && i.cantidad > 0);
+    if (items.length === 0) throw new Error("Elegí al menos una pieza para entregar.");
+    const { data, error } = await db().rpc("entregar_parcial", { p_pedido: id, p_autor: yo, p_items: items, p_recibio: datos.recibio, p_firma: datos.firma });
+    if (error) throw new Error(error.message);
+    const r = data as { ok: boolean; faltantes?: string[]; completo?: boolean };
+    if (!r.ok) throw new Error(`Faltan piezas terminadas: ${(r.faltantes ?? []).join("; ")}`);
+    const p = await numeroDe(id);
+    const total = items.reduce((s, i) => s + i.cantidad, 0);
+    await registrarNovedad(yo, "pedidos", `Pedido ${p.numero}: entrega parcial de ${total} piezas`, `Recibió: ${datos.recibio}${r.completo ? " · con esto se completó el pedido" : ""}`);
+    await notificar(`📦 Entrega parcial ${p.numero}`, `${total} piezas para ${datos.recibio}.${r.completo ? " El pedido quedó completo." : ""}`, urlApp(`/produccion/pedido/${id}`));
+    return { mensaje: r.completo ? "Entregado: se completó el pedido" : "Entrega parcial registrada" };
+  });
+}

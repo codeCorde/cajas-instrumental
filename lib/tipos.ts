@@ -142,7 +142,23 @@ export interface PedidoPieza {
   pedido_id: string;
   instrumental_id: string;
   caja_id: string | null;
+  componente_id: string | null; // medida suelta (set personalizado); null = pieza o set entero
   cantidad: number;
+  entregada: number;
+}
+export interface EntregaPieza {
+  pedido_pieza_id: string;
+  cantidad: number;
+}
+export interface Entrega {
+  id: string;
+  pedido_id: string;
+  parcial: boolean;
+  autor: string;
+  recibido_por: string;
+  firma: string;
+  creado_en: string;
+  piezas: EntregaPieza[];
 }
 export interface Pedido {
   id: string;
@@ -169,6 +185,7 @@ export interface Pedido {
   motivo_cancelacion: string | null;
   items: PedidoItem[]; // pedidos viejos, por caja completa
   piezas: PedidoPieza[];
+  entregas?: Entrega[];
 }
 
 export type Resultado = "conforme" | "observaciones" | "no_conforme";

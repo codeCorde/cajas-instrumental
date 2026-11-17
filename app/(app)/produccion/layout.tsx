@@ -22,6 +22,9 @@ export default async function ProduccionLayout({ children }: { children: React.R
           <Link href="/produccion/qr" className="btn">
             QR de pedidos
           </Link>
+          <Link href="/produccion/faltantes" className="btn">
+            ❓ Info que falta
+          </Link>
           <Link href="/produccion/avisos" className="btn">
             🔔 Avisos al celular
           </Link>

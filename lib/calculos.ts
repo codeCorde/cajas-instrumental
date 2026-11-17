@@ -304,10 +304,24 @@ export function estadoTerminadasCaja(composicion: { inst: InstCalc; cantPorCaja:
   return "incompleta";
 }
 
-/** Listado general: suma lo pedido de cada pieza en todas las órdenes (instrumental_id → cantidad). */
-export function listadoGeneral(pedidos: { piezas: { instrumental_id: string; cantidad: number }[] }[]): Record<string, number> {
+/** Clave de una línea de pedido: la pieza, o la pieza + la medida suelta de un set personalizado. */
+export const claveLinea = (instrumentalId: string, componenteId?: string | null) => (componenteId ? `${instrumentalId}|${componenteId}` : instrumentalId);
+
+/**
+ * Listado general: suma lo que FALTA entregar de cada pieza en todas las órdenes (cantidad − entregada).
+ * Las medidas sueltas de un set personalizado van en su propia línea (clave `pieza|medida`).
+ */
+export function listadoGeneral(
+  pedidos: { piezas: { instrumental_id: string; componente_id?: string | null; cantidad: number; entregada?: number }[] }[],
+): Record<string, number> {
   const total: Record<string, number> = {};
-  for (const p of pedidos) for (const it of p.piezas) total[it.instrumental_id] = (total[it.instrumental_id] ?? 0) + it.cantidad;
+  for (const p of pedidos)
+    for (const it of p.piezas) {
+      const n = it.cantidad - (it.entregada ?? 0);
+      if (n <= 0) continue;
+      const k = claveLinea(it.instrumental_id, it.componente_id);
+      total[k] = (total[k] ?? 0) + n;
+    }
   return total;
 }
 
@@ -318,44 +332,93 @@ export interface PlanPedido {
 }
 
 /**
- * Qué se descuenta al finalizar ("armar") un pedido. Misma regla que taller.finalizar_pedido (0009).
- *  Simple → stock terminado · Medidas → cant_por_unidad × cantidad de cada medida · Complejo → unidades armadas.
- *  Cajas (pedidos viejos por caja) → cajas armadas.
+ * Qué se descuenta al finalizar o entregar (parcial) un pedido. Misma regla que taller._necesidades (0010):
+ *  Simple → stock terminado · Complejo → unidades armadas · Set entero → cada medida × cant_por_unidad ·
+ *  Medida suelta (set personalizado) → esa medida × cant_por_unidad. Se suma por destino (una medida pedida
+ *  en el set y suelta cuenta una vez con el total). Cajas (pedidos viejos) → cajas armadas.
  */
 export function planFinalizarPedido(
-  piezas: { inst: InstCalc; cantidad: number }[],
+  piezas: { inst: InstCalc; componenteId?: string | null; cantidad: number }[],
   cajas: { nombre: string; cajas_armadas: number; cantidad: number }[] = [],
 ): PlanPedido {
-  const faltantes: string[] = [];
-  const descuentos: PlanPedido["descuentos"] = [];
-  const porInst = new Map<string, { inst: InstCalc; cantidad: number }>();
-  for (const p of piezas) {
-    const t = porInst.get(p.inst.id) ?? { inst: p.inst, cantidad: 0 };
-    t.cantidad += p.cantidad;
-    porInst.set(p.inst.id, t);
-  }
-  if (porInst.size === 0 && cajas.length === 0) return { ok: false, faltantes: ["El pedido no tiene piezas"], descuentos };
-
-  for (const { inst, cantidad } of porInst.values()) {
-    if (inst.tipo === "simple") {
-      if (inst.stock_terminado < cantidad) faltantes.push(`${inst.nombre}: hay ${inst.stock_terminado} terminados de ${cantidad}`);
-      descuentos.push({ etiqueta: inst.nombre, cantidad, hay: inst.stock_terminado });
-    } else if (inst.tipo === "medidas") {
-      const comps = componentesDe(inst);
-      if (comps.length === 0) faltantes.push(`${inst.nombre}: sin medidas cargadas`);
-      for (const c of comps) {
-        const n = c.cant_por_unidad * cantidad;
-        if (c.stock < n) faltantes.push(`${inst.nombre} ${c.codigo_o_medida}: hay ${c.stock} de ${n}`);
-        descuentos.push({ etiqueta: `${inst.nombre} ${c.codigo_o_medida}`, cantidad: n, hay: c.stock });
-      }
+  const destinos = new Map<string, { etiqueta: string; orden: [string, string]; cantidad: number; hay: number; sinMedidas?: boolean }>();
+  const sumar = (k: string, etiqueta: string, orden: [string, string], cantidad: number, hay: number, sinMedidas = false) => {
+    const d = destinos.get(k) ?? { etiqueta, orden, cantidad: 0, hay, sinMedidas };
+    d.cantidad += cantidad;
+    destinos.set(k, d);
+  };
+  for (const { inst, componenteId, cantidad } of piezas) {
+    if (cantidad <= 0) continue;
+    if (componenteId) {
+      const c = inst.componentes.find((x) => x.id === componenteId);
+      if (c) sumar(`c:${c.id}`, `${inst.nombre} ${c.codigo_o_medida}`, [inst.nombre, c.codigo_o_medida], c.cant_por_unidad * cantidad, c.stock);
+    } else if (inst.tipo === "simple") {
+      sumar(`t:${inst.id}`, inst.nombre, [inst.nombre, ""], cantidad, inst.stock_terminado);
+    } else if (inst.tipo === "complejo") {
+      sumar(`a:${inst.id}`, `${inst.nombre} (armados)`, [inst.nombre, ""], cantidad, inst.unidades_armadas);
     } else {
-      if (inst.unidades_armadas < cantidad) faltantes.push(`${inst.nombre}: hay ${inst.unidades_armadas} armados de ${cantidad}`);
-      descuentos.push({ etiqueta: `${inst.nombre} (armados)`, cantidad, hay: inst.unidades_armadas });
+      const comps = componentesDe(inst);
+      if (comps.length === 0) sumar(`s:${inst.id}`, inst.nombre, [inst.nombre, ""], 1, 0, true);
+      for (const c of comps) sumar(`c:${c.id}`, `${inst.nombre} ${c.codigo_o_medida}`, [inst.nombre, c.codigo_o_medida], c.cant_por_unidad * cantidad, c.stock);
     }
   }
+  if (destinos.size === 0 && cajas.length === 0) return { ok: false, faltantes: ["El pedido no tiene piezas"], descuentos: [] };
+
+  const lista = [...destinos.values()].sort((a, b) => a.orden[0].localeCompare(b.orden[0], "es") || a.orden[1].localeCompare(b.orden[1], "es", { numeric: true }));
+  const faltantes = lista.filter((d) => d.sinMedidas || d.hay < d.cantidad).map((d) => (d.sinMedidas ? `${d.etiqueta}: sin medidas cargadas` : `${d.etiqueta}: hay ${d.hay} de ${d.cantidad}`));
+  const descuentos = lista.filter((d) => !d.sinMedidas).map(({ etiqueta, cantidad, hay }) => ({ etiqueta, cantidad, hay }));
   for (const c of cajas) {
     if (c.cajas_armadas < c.cantidad) faltantes.push(`${c.nombre}: hay ${c.cajas_armadas} cajas armadas de ${c.cantidad}`);
     descuentos.push({ etiqueta: `${c.nombre} (cajas armadas)`, cantidad: c.cantidad, hay: c.cajas_armadas });
   }
   return { ok: faltantes.length === 0, faltantes, descuentos };
+}
+
+// ---------------------------------------------------------------------------
+// Información que falta cargar (para preguntarle al dueño en los recordatorios)
+// ---------------------------------------------------------------------------
+
+export interface DatosFicha {
+  nombre: string;
+  tipo: TipoInstrumental;
+  origen: "propia" | "tercerizado";
+  a_confirmar: boolean;
+  proceso: string | null;
+  maquina: string | null;
+  herramientas: string | null;
+  etapa: string | null;
+  partes: { nombre: string; etapa: string | null }[]; // medidas o piezas
+  archivos: string[]; // extensiones de los archivos vigentes
+}
+export type ClaveFaltante = "foto" | "plano2d" | "modelo3d" | "programa" | "maquina" | "herramientas" | "proceso" | "etapa" | "medidas" | "confirmar";
+
+const EXT_FOTO = ["png", "jpg", "jpeg", "webp", "gif"];
+const EXT_2D = ["pdf", "dwg", "dxf"];
+const EXT_3D = ["stp", "step"];
+const EXT_CNC = ["txt", "nc", "gcode", "ngc", "tap", "cnc"];
+
+/** Qué le falta a la ficha de una pieza, como preguntas cortas. Las tercerizadas no piden programa, máquina ni herramientas. */
+export function infoFaltante(f: DatosFicha): { clave: ClaveFaltante; pregunta: string }[] {
+  const tiene = (exts: string[]) => f.archivos.some((a) => exts.includes(a));
+  const propia = f.origen === "propia";
+  const out: { clave: ClaveFaltante; pregunta: string }[] = [];
+  if (f.tipo !== "simple" && f.partes.length === 0) out.push({ clave: "medidas", pregunta: `¿Qué ${f.tipo === "medidas" ? "medidas" : "partes"} lleva «${f.nombre}»?` });
+  if (f.a_confirmar) out.push({ clave: "confirmar", pregunta: `¿Confirmás cuántas «${f.nombre}» lleva cada caja?` });
+  if (!tiene(EXT_FOTO)) out.push({ clave: "foto", pregunta: `Mandame una foto de «${f.nombre}».` });
+  if (!tiene(EXT_2D)) out.push({ clave: "plano2d", pregunta: `¿Tenés el plano 2D (PDF o DWG) de «${f.nombre}»?` });
+  if (!tiene(EXT_3D)) out.push({ clave: "modelo3d", pregunta: `¿Tenés el modelo 3D (STEP) de «${f.nombre}»?` });
+  if (propia && !tiene(EXT_CNC)) out.push({ clave: "programa", pregunta: `¿Tenés el programa de mecanizado (Bloc de notas) de «${f.nombre}»?` });
+  if (propia && !f.maquina) out.push({ clave: "maquina", pregunta: `¿En qué máquina se hace «${f.nombre}»?` });
+  if (propia && !f.herramientas) out.push({ clave: "herramientas", pregunta: `¿Qué mechas y machos usa «${f.nombre}»?` });
+  if (!f.proceso) out.push({ clave: "proceso", pregunta: `¿Cuántos procesos lleva «${f.nombre}» y cuáles son?` });
+  const sinEtapa = f.tipo === "simple" ? (f.etapa ? [] : [f.nombre]) : f.partes.filter((p) => !p.etapa).map((p) => p.nombre);
+  if (sinEtapa.length) out.push({ clave: "etapa", pregunta: `¿En qué etapa está «${f.nombre}»${f.tipo === "simple" ? "" : ` (${sinEtapa.slice(0, 4).join(", ")}${sinEtapa.length > 4 ? "…" : ""})`}?` });
+  return out;
+}
+
+/** Terminadas de una línea de pedido: la pieza/set entero, o las unidades de una medida suelta. */
+export function terminadasLinea(inst: InstCalc, componenteId?: string | null): number {
+  if (!componenteId) return piezasTerminadas(inst);
+  const c = inst.componentes.find((x) => x.id === componenteId);
+  return c ? Math.floor(c.stock / c.cant_por_unidad) : 0;
 }

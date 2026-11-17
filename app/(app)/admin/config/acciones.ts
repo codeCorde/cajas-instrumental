@@ -90,3 +90,32 @@ export async function activarPersona(id: string, activa: boolean): Promise<Resul
     sinError(await db().from("personas").update({ activa }).eq("id", id));
   });
 }
+
+// ---------------- Acceso privado ----------------
+
+export async function crearInvitacion(fd: FormData): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    const nombre = obligatorio(fd, "nombre", "el nombre").replace(/\s+/g, " ").slice(0, 40);
+    sinError(await db().from("invitaciones").insert({ nombre, creada_por: yo }));
+    await registrarNovedad(yo, "acceso", `Invitación al taller para ${nombre}`);
+    return { mensaje: "Invitación creada: copiá el link y mandáselo" };
+  });
+}
+
+export async function borrarInvitacion(id: string): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    await quienSoy();
+    sinError(await db().from("invitaciones").delete().eq("id", id).is("usada_en", null));
+  });
+}
+
+/** Cambia la clave del QR de pedidos: los QR impresos dejan de funcionar y hay que imprimir el nuevo. */
+export async function cambiarClavePedir(): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    const clave = crypto.randomUUID().replace(/-/g, "");
+    sinError(await db().from("config").upsert({ clave: "pedir", valor: { clave } }));
+    await registrarNovedad(yo, "acceso", "Se cambió el link del QR de pedidos", "Los QR impresos anteriores ya no sirven.");
+  });
+}
