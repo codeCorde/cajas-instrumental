@@ -1,9 +1,11 @@
-// Todas las rutas piden sesión (también las del QR). Sin sesión → /ingresar y después vuelve a la página original.
+// Todas las rutas piden sesión (también las del QR del taller), salvo /pedir, /api/cron y /api/claude (con su propio secreto). Sin sesión → /ingresar y después vuelve a la página original.
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE_SESION, leerSesion } from "@/lib/sesion";
 
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
+  // Sin sesión: el QR de pedidos (lo escanea el solicitante), los avisos (CRON_SECRET) y la API de Claude (CLAUDE_API_TOKEN).
+  if (pathname === "/pedir" || pathname.startsWith("/pedir/") || pathname.startsWith("/api/cron/") || pathname === "/api/claude") return NextResponse.next();
   const sesion = await leerSesion(req.cookies.get(COOKIE_SESION)?.value);
   const volver = encodeURIComponent(pathname + search);
 

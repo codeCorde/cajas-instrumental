@@ -28,7 +28,9 @@ export default function Chat({ yo, iniciales }: { yo: string; iniciales: Mensaje
     const t = setInterval(() => document.visibilityState === "visible" && traer(), 4000);
     return () => clearInterval(t);
   }, []);
-  useEffect(() => fin.current?.scrollIntoView({ block: "end" }), [mensajes.length]);
+  useEffect(() => {
+    fin.current?.scrollIntoView({ block: "end" });
+  }, [mensajes.length]);
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();

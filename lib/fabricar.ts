@@ -35,7 +35,7 @@ export const ESTADOS_ABIERTOS = ["pendiente", "en_produccion", "listo"] as const
 
 export async function pedidosAbiertos(): Promise<Pedido[]> {
   return sinError(
-    await db().from("pedidos").select("*, items:pedido_items(*)").in("estado", ESTADOS_ABIERTOS as unknown as string[]).order("fecha_compromiso", { ascending: true, nullsFirst: false }),
+    await db().from("pedidos").select("*, items:pedido_items(*), piezas:pedido_piezas(*)").in("estado", ESTADOS_ABIERTOS as unknown as string[]).order("fecha_compromiso", { ascending: true, nullsFirst: false }),
   ) as Pedido[];
 }
 

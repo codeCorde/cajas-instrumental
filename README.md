@@ -4,7 +4,7 @@ App web que reemplaza el Excel de control de producción y stock de **cajas de i
 Repite la estructura y los cálculos del Excel y suma: catálogo único de instrumental con **stock compartido** entre cajas,
 procesos de trabajo y planos, armado de cajas, carga por **QR** desde el taller, pedidos y control de calidad.
 
-Producción: <https://cajas-instrumental-eta.vercel.app> · Repo: <https://github.com/codeCorde/cajas-instrumental>
+Producción: <https://cajas-instrumental-chi.vercel.app> · Repo: <https://github.com/marmaxnetizen/cajas-instrumental>
 
 Stack: **Next.js 15** (App Router, Server Actions) + TypeScript · **Supabase** (Postgres + Storage) · **Tailwind 4** · **Vercel**.
 
@@ -23,8 +23,8 @@ app/taller/[codigo]      4 Vista del taller (se abre con el QR de la caja), mobi
 app/archivos/[id]        abre un archivo con link firmado de 10 min (?descargar para bajarlo)
 lib/calculos.ts      ★   lógica de negocio (stock completo, estados, cajas que alcanza, faltantes, armado, qué fabricar)
 lib/datos.ts             lecturas · lib/db.ts cliente service_role · lib/sesion.ts cookie firmada
-middleware.ts            todas las rutas piden sesión
-supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales
+middleware.ts            todas las rutas piden sesión (salvo /pedir con clave, /api/cron y /api/claude con secreto)
+supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales · 0009 pedidos por QR y órdenes · 0010 sets, entrega parcial e invitaciones
 scripts/                 hash-password, probar-sql (app anterior), probar-taller (app nueva)
 tests/calculos.test.ts   tests de los cálculos
 ```
@@ -32,7 +32,7 @@ tests/calculos.test.ts   tests de los cálculos
 ## 2. Supabase
 
 1. Crear el proyecto en <https://supabase.com>.
-2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0008). La 0008 carga el catálogo
+2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0010). La 0008 carga el catálogo
    inicial (todo con stock en 0, `cant_por_caja = 1` y marcado «A confirmar») y pasa los planos de la app anterior.
    Si Supabase avisa «tablas sin RLS», elegí **Run without RLS**: el script activa RLS en todas las tablas al final.
 3. **Integrations → Data API → Settings → Exposed schemas**: agregar `taller` y guardar.
@@ -52,6 +52,11 @@ Copiá `.env.example` a `.env.local` y completá:
 | `NEXT_PUBLIC_SITE_URL` | URL pública (la que va en los QR) |
 | `APP_PASSWORD_HASH` | Contraseña única, como hash bcrypt en base64 |
 | `SESSION_SECRET` | Firma la cookie de sesión (≥ 32 caracteres al azar) |
+| `CRON_SECRET` | Protege el resumen diario (`/api/cron/resumen-diario`). Vercel lo manda solo |
+| `CLAUDE_API_TOKEN` | Clave de la API con la que Claude carga datos (≥ 32 caracteres al azar) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Avisos por Telegram (opcional) |
+| `CALLMEBOT_TELEFONOS`, `CALLMEBOT_APIKEYS` | Avisos por WhatsApp con CallMeBot (opcional, separados por coma) |
+| `NTFY_TEMA`, `NTFY_SERVIDOR` | Notificación push al celular con la app ntfy (opcional) |
 
 ### Contraseña única
 ```bash
@@ -105,6 +110,59 @@ anterior como «versión anterior».
 ### Imprimir los QR
 Conteo de cajas → abrí una caja → **▦ QR de la caja**. Elegí **Hoja A4** o **Etiqueta chica** y tocá **Imprimir**.
 El QR abre `/taller/<código>`: carga de stock con + / −, qué falta y procesos. Pide la contraseña si el celular no tiene sesión.
+
+### Pedidos por QR y producción (migración 0009)
+1. **QR de pedidos** (Producción → QR de pedidos) abre `/pedir?k=<clave>`, sin contraseña pero **solo con el link del QR** (la clave se cambia con «Cambiar link»): presentación InstrumentARG de 5 s →
+   elegir caja → cantidad de cada pieza (▲ / número / ▼) → «Agregar al pedido» o «Finalizar pedido» → nombre, fecha y firma
+   → «Realizar orden de trabajo». El solicitante recibe un número (`OP-0001`) y un link secreto para ver el estado o cancelar.
+   No muestra stock. Máximo 10 pedidos por hora por conexión. Los **sets** se piden enteros y se pueden personalizar sacando medidas.
+2. **Producción** (4 pestañas):
+   - **Órdenes de producción**: se recepcionan los pedidos nuevos (pasan a orden). Sin elegir una orden se ve el listado
+     general con todo sumado; eligiendo una, su listado y su fecha.
+   - **Stock de partes**: caja → pieza → clasificación (compleja / simple / set completo), cada parte con su stock y su
+     **etapa** del proceso, máquina y mechas/machos, planos 2D/3D y programa de mecanizado (.txt/.nc/.gcode/.tap), comentarios.
+   - **Stock de piezas terminadas**: por caja, ● completa · ■ incompleta · ✕ vacía. Las complejas se suman con «Armar 1»
+     (descuenta 1 de cada parte). «Armar pedido» lleva a la orden para finalizarla.
+   - **Pedidos entregados**: Finalizado (naranja) → «Firmar» → Entregado (verde) con **remito** imprimible.
+3. **Entregar parcial** (en el pedido): elegís piezas y cantidades, quien recibe firma en tu celular y se descuenta del stock de terminadas. Cada entrega queda registrada con su firma en el remito.
+4. **Cancelar** se puede desde las dos páginas (solicitante y taller) hasta que se entrega; si ya estaba finalizado, devuelve lo no entregado. Los cancelados quedan en «Pedidos entregados → Cancelados».
+5. Estados en la base: `pendiente` = por recepcionar, `en_produccion`, `listo` = finalizado, `entregado`, `cancelado`.
+
+### Avisos al celular
+Un **canal** es el camino por el que llega el mensaje al celular. El elegido es **WhatsApp con CallMeBot**.
+Cada pedido nuevo, recepcionado, finalizado, entregado (también parcial) o cancelado manda un aviso. Además, todos los días
+(GitHub Actions, `.github/workflows/avisos.yml`, solo desde `main`): **resumen a las 6:40** y **recordatorios a las 9:40, 12:40 y 15:40**
+con lo pendiente y 3 preguntas sobre información que falta cargar (lista completa en **Producción → ❓ Info que falta**).
+Para activarlo: `CRON_SECRET` en Vercel **y** en GitHub → Settings → Secrets and variables → Actions. Se prueba en **Producción → 🔔 Avisos al celular**.
+Canales (cualquiera, o varios):
+- **Telegram** (recomendado): hablale a `@BotFather` → `/newbot` → token. Agregá el bot a un grupo del equipo, mandá un
+  mensaje y sacá el `chat_id` de `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+- **WhatsApp** (CallMeBot, gratis y de uso personal): cada persona agenda el número de CallMeBot y le manda el mensaje de
+  autorización que indica su web; le responde con su apikey. Teléfonos y apikeys van en el mismo orden.
+- **ntfy** (push): instalá la app ntfy, suscribite a un tema difícil de adivinar y ponelo en `NTFY_TEMA`.
+
+Sin canales configurados no se manda nada (la app funciona igual).
+
+### Acceso privado (solo por invitación)
+- Con la contraseña solo se puede elegir a una persona **habilitada**; ya no se crean nombres nuevos al ingresar
+  (salvo la primera vez, cuando no hay nadie habilitado).
+- Para sumar a alguien: **Administración → Configuración → Invitaciones** → «Crear invitación» → copiá el link y mandáselo.
+  Sirve una sola vez y vence a los 7 días. Al aceptarlo entra sin contraseña en ese equipo.
+- Para sacarle el acceso a alguien: **Personas → Desactivar** (se corta al instante; su historial queda).
+- Recomendado: desactivar a todos menos a los dos socios y **cambiar la contraseña** (ver «Contraseña única»).
+
+### Carga automática con Claude
+Claude carga lo que le dictás o mandás (fotos, planos, programas, máquinas, etapas, stock, pedidos) por la API `/api/claude`:
+1. Generá una clave: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`.
+2. Ponela en Vercel como `CLAUDE_API_TOKEN` y en tu `.env.local` como `CLAUDE_API_TOKEN` + `CLAUDE_API_URL` (la URL de la app).
+3. Claude usa `node scripts/claude-api.mjs get faltantes | catalogo | pedidos`, `post '<json>'` y `subir <entidad> <id> <archivo>`.
+Todo queda con autor «Claude» en el historial y en Novedades. El stock se mueve solo por RPC, igual que en la app.
+
+### Investigación diaria
+Una tarea programada de Claude (app de escritorio, ~7:20) revisa qué falta cargar, investiga un tema por día
+(tercerizados, procesos, productos nuevos, mejoras de la app, competencia) y deja un informe en
+`Proyecto 1 Cajas de Cirugia/Informes diarios/` con mejoras para aprobar («Sí / No») y preguntas para los clientes.
+No cambia nada sin aprobación.
 
 ## 7. Trabajo en equipo (con Claude Code)
 1. `git checkout main && git pull` → `git checkout -b feat/lo-que-sea`.

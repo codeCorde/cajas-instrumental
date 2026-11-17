@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   cajasFaltantesParaPedidos,
+  estadoTerminadasCaja,
+  listadoGeneral,
+  piezasTerminadas,
+  planFinalizarPedido,
+  infoFaltante,
+  terminadasLinea,
   estadoEnCaja,
   filasComponentes,
   generarRango,
@@ -168,4 +174,89 @@ describe("rango de medidas", () => {
   it("decimales con coma", () => expect(generarRango("N°7,5 a N°20 de a 2,5")).toEqual(["N°7.5", "N°10", "N°12.5", "N°15", "N°17.5", "N°20"]));
   it("sin paso", () => expect(generarRango("12-14")).toEqual(["12", "13", "14"]));
   it("no entiende", () => expect(generarRango("cualquier cosa")).toBeNull());
+});
+
+describe("piezas terminadas (QR de pedidos)", () => {
+  it("simple = stock terminado, medidas = sets completos, complejo = solo armados", () => {
+    expect(piezasTerminadas(simple(4))).toBe(4);
+    expect(piezasTerminadas(medidas({ Ø44: 3, Ø46: 1 }))).toBe(1);
+    expect(piezasTerminadas(complejo(2, [["1/2", 9, 1], ["2/2", 9, 1]]))).toBe(2); // las piezas sueltas no cuentan
+  });
+  it("estado de la caja: completa ●, incompleta ■, vacía ✕", () => {
+    expect(estadoTerminadasCaja([{ inst: simple(2), cantPorCaja: 2 }, { inst: medidas({ Ø44: 1 }), cantPorCaja: 1 }])).toBe("completa");
+    expect(estadoTerminadasCaja([{ inst: simple(1), cantPorCaja: 2 }, { inst: medidas({ Ø44: 1 }), cantPorCaja: 1 }])).toBe("incompleta");
+    expect(estadoTerminadasCaja([{ inst: simple(0), cantPorCaja: 1 }, { inst: complejo(0, [["1/2", 5, 1]]), cantPorCaja: 1 }])).toBe("vacia");
+    expect(estadoTerminadasCaja([])).toBe("vacia");
+  });
+  it("listado general suma los pedidos (ejemplo de las fotos: Laura + Paola)", () => {
+    const laura = { piezas: [{ instrumental_id: "impactor", cantidad: 3 }, { instrumental_id: "fresas", cantidad: 1 }] };
+    const paola = { piezas: [{ instrumental_id: "impactor", cantidad: 3 }, { instrumental_id: "probadores", cantidad: 1 }] };
+    expect(listadoGeneral([laura, paola])).toEqual({ impactor: 6, fresas: 1, probadores: 1 });
+  });
+  it("listado general: resta lo entregado en parciales y separa las medidas sueltas", () => {
+    const p = { piezas: [{ instrumental_id: "impactor", cantidad: 3, entregada: 2 }, { instrumental_id: "fresas", componente_id: "o52", cantidad: 2 }, { instrumental_id: "cureta", cantidad: 1, entregada: 1 }] };
+    expect(listadoGeneral([p])).toEqual({ impactor: 1, "fresas|o52": 2 });
+  });
+});
+
+describe("finalizar pedido (misma regla que taller.finalizar_pedido)", () => {
+  it("mismo caso que scripts/probar-taller.mjs: falta S", () => {
+    const s = simple(1, "S");
+    const m: InstCalc = { ...medidas({}), componentes: [comp("medida", "Ø44", 2, 1), comp("medida", "Ø46", 5, 2)] };
+    const c = complejo(3, [["A", 0, 1]]);
+    const plan = planFinalizarPedido([{ inst: s, cantidad: 1 }, { inst: s, cantidad: 1 }, { inst: m, cantidad: 1 }, { inst: c, cantidad: 1 }]);
+    expect(plan.ok).toBe(false);
+    expect(plan.faltantes).toEqual(["Cureta: hay 1 de 2"]);
+    expect(plan.descuentos.map((d) => [d.etiqueta, d.cantidad])).toEqual([
+      ["Cureta", 2],
+      ["Mango (armados)", 1],
+      ["Probador Ø44", 1],
+      ["Probador Ø46", 2],
+    ]);
+  });
+  it("con stock alcanza; los complejos usan solo armados", () => {
+    const plan = planFinalizarPedido([{ inst: simple(2), cantidad: 2 }, { inst: complejo(0, [["A", 10, 1]]), cantidad: 1 }]);
+    expect(plan.ok).toBe(false);
+    expect(plan.faltantes).toEqual(["Mango (armados): hay 0 de 1"]);
+  });
+  it("pedidos viejos por caja: cajas armadas", () => {
+    expect(planFinalizarPedido([], [{ nombre: "Caja DM", cajas_armadas: 1, cantidad: 2 }]).faltantes).toEqual(["Caja DM: hay 1 cajas armadas de 2"]);
+    expect(planFinalizarPedido([], [{ nombre: "Caja DM", cajas_armadas: 2, cantidad: 2 }]).ok).toBe(true);
+  });
+  it("sin piezas no se finaliza", () => expect(planFinalizarPedido([]).ok).toBe(false));
+  it("set personalizado: medida suelta, y si también se pide el set entero se suma", () => {
+    const m: InstCalc = { ...medidas({}), componentes: [comp("medida", "Ø44", 4, 1), comp("medida", "Ø46", 6, 2)] };
+    const o46 = m.componentes[1].id;
+    expect(planFinalizarPedido([{ inst: m, componenteId: o46, cantidad: 1 }]).descuentos).toEqual([{ etiqueta: "Probador Ø46", cantidad: 2, hay: 6 }]);
+    const plan = planFinalizarPedido([{ inst: m, cantidad: 2 }, { inst: m, componenteId: o46, cantidad: 2 }]);
+    expect(plan.descuentos).toEqual([
+      { etiqueta: "Probador Ø44", cantidad: 2, hay: 4 },
+      { etiqueta: "Probador Ø46", cantidad: 8, hay: 6 },
+    ]);
+    expect(plan.faltantes).toEqual(["Probador Ø46: hay 6 de 8"]);
+  });
+  it("set sin medidas cargadas (mismo texto que la base)", () =>
+    expect(planFinalizarPedido([{ inst: { ...medidas({}), nombre: "Raspas" }, cantidad: 1 }]).faltantes).toEqual(["Raspas: sin medidas cargadas"]));
+});
+
+describe("información que falta cargar", () => {
+  const base = { nombre: "Cureta", tipo: "simple" as const, origen: "propia" as const, a_confirmar: false, proceso: null, maquina: null, herramientas: null, etapa: null, partes: [], archivos: [] };
+  it("ficha vacía de una pieza propia pide todo", () =>
+    expect(infoFaltante(base).map((x) => x.clave)).toEqual(["foto", "plano2d", "modelo3d", "programa", "maquina", "herramientas", "proceso", "etapa"]));
+  it("ficha completa no pide nada", () =>
+    expect(infoFaltante({ ...base, proceso: "1. Torneado", maquina: "Torno CNC", herramientas: "Mecha Ø4", etapa: "Terminada", archivos: ["jpg", "pdf", "step", "nc"] })).toEqual([]));
+  it("tercerizada no pide programa, máquina ni herramientas; set sin medidas las pide", () => {
+    const r = infoFaltante({ ...base, tipo: "medidas", origen: "tercerizado", a_confirmar: true, archivos: ["jpg", "pdf", "stp"], proceso: "x" }).map((x) => x.clave);
+    expect(r).toEqual(["medidas", "confirmar"]);
+  });
+  it("partes sin etapa", () =>
+    expect(infoFaltante({ ...base, tipo: "complejo", partes: [{ nombre: "1/2", etapa: "Torneado" }, { nombre: "2/2", etapa: null }] }).find((x) => x.clave === "etapa")?.pregunta).toBe("¿En qué etapa está «Cureta» (2/2)?"));
+});
+
+describe("terminadas de una línea", () => {
+  it("medida suelta = stock / cant_por_unidad; sin medida = la pieza", () => {
+    const m: InstCalc = { ...medidas({}), componentes: [comp("medida", "Ø44", 5, 2), comp("medida", "Ø46", 1, 1)] };
+    expect(terminadasLinea(m, m.componentes[0].id)).toBe(2);
+    expect(terminadasLinea(m)).toBe(1);
+  });
 });

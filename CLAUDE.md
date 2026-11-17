@@ -1,7 +1,7 @@
 # CLAUDE.md — guía del proyecto para Claude (y para el equipo)
 
 App web que reemplaza el Excel de control de producción y stock de **cajas de instrumental quirúrgico**.
-Producción: https://cajas-instrumental-eta.vercel.app · Repo: codeCorde/cajas-instrumental
+Producción: https://cajas-instrumental-chi.vercel.app · Repo: marmaxnetizen/cajas-instrumental
 
 ## Stack
 Next.js 15 (App Router, Server Actions) + TypeScript · Supabase (Postgres, Auth, RLS, Storage) · Tailwind 4 · Vercel.
@@ -23,12 +23,15 @@ En Windows, si PowerShell bloquea `npm`/`npx`, usar `npm.cmd` / `npx.cmd`.
 2. **Cálculos solo en `lib/calculos.ts`** (stock completo, estados, cajas que alcanza, qué fabricar). Funciones puras con tests.
    Cualquier cambio de cálculo lleva su test en `tests/calculos.test.ts`.
 3. **El stock solo cambia por RPC** (`taller.ajustar_stock`, `armar_instrumental`, `armar_caja`, `desarmar_caja`,
-   `entregar_pedido` en `supabase/migrations/0007_taller.sql`), llamadas desde `app/(app)/acciones-stock.ts`.
+   `entregar_pedido` en `0007_taller.sql`; `finalizar_pedido`, `entregar_parcial`, `cancelar_pedido` en `0010_sets_y_entrega_parcial.sql`, con la regla en `taller._necesidades`), llamadas desde `app/(app)/acciones-stock.ts`.
    Nunca hacer `update ... set stock = ...` desde la app. El historial (`movimientos`) es solo inserción.
-4. **Regla de armado duplicada a propósito**: `taller.armar_caja` (SQL) y `planArmadoCaja` en `lib/calculos.ts` (vista previa).
+4. **Reglas duplicadas a propósito**: `taller.armar_caja` ↔ `planArmadoCaja` y `taller.finalizar_pedido` ↔ `planFinalizarPedido` (vista previa en `lib/calculos.ts`).
    Si cambia una, cambia la otra; `tests/calculos.test.ts` y `scripts/probar-taller.mjs` prueban el mismo caso.
 5. **Acceso**: contraseña única (`APP_PASSWORD_HASH`) + nombre elegido, en cookie firmada (`lib/sesion.ts`, `middleware.ts`).
-   No hay roles. La base no tiene acceso público: todo pasa por el servidor con `lib/db.ts` (service_role, esquema `taller`).
+   No hay roles, pero el taller es **privado**: solo personas habilitadas por invitación (`taller.invitaciones`, `quienSoy()` revisa que la persona esté activa).
+   Excepciones sin sesión: `/pedir` (solo con la clave del QR `?k=`; crea pedidos «por recepcionar» y nunca muestra stock), `/pedir/seguimiento/<token>`,
+   `/api/cron` (CRON_SECRET) y `/api/claude` (CLAUDE_API_TOKEN, autor «Claude»).
+   La base no tiene acceso público: todo pasa por el servidor con `lib/db.ts` (service_role, esquema `taller`).
    Si agregás una tabla en `taller`: `enable row level security`, `revoke all ... from public, anon, authenticated`,
    `grant ... to service_role`, y tests en `scripts/probar-taller.mjs`. Cada Server Action llama a `quienSoy()`.
 6. **Migraciones**: nunca editar una migración ya aplicada. Crear la siguiente (`0009_...sql`), agregarla a
@@ -42,11 +45,14 @@ En Windows, si PowerShell bloquea `npm`/`npx`, usar `npm.cmd` / `npx.cmd`.
 
 ## Mapa
 ```
-app/(app)/            conteo (/), cajas/[codigo], instrumental, stock (fabricar, historial), admin (pedidos, calidad, config), tareas, novedades, chat
+app/(app)/            conteo (/), cajas/[codigo], instrumental, produccion (órdenes, partes, terminadas, entregados, pedido/[id], avisos), stock, admin (calidad, config), tareas, novedades, chat
+app/pedir/            QR de pedidos PÚBLICO (sin contraseña) y /pedir/seguimiento/[token]      app/api/cron/  resumen diario (CRON_SECRET)
 app/taller/[codigo]    vista del QR (celular)      app/ingresar/  contraseña + nombre
 lib/calculos.ts       ★ lógica de negocio y regla de armado (vista previa)
 lib/datos.ts          lecturas      lib/db.ts  cliente service_role (esquema taller)
-supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos · 0005 novedades y tareas · 0006 chat · 0007 esquema taller · 0008 datos       supabase/seed.sql  datos de ejemplo
+lib/pedidos.ts        lecturas de pedidos      lib/notificar.ts  avisos (WhatsApp CallMeBot / Telegram / ntfy)      lib/resumen.ts  resumen 6:40 y recordatorios
+lib/faltantes.ts      información que falta cargar      app/api/claude  API para que Claude cargue datos (scripts/claude-api.mjs)      .github/workflows/avisos.yml  horarios de los avisos
+supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos · 0005 novedades y tareas · 0006 chat · 0007 esquema taller · 0008 datos · 0009 pedidos QR · 0010 sets, parciales, invitaciones       supabase/seed.sql  datos de ejemplo
 scripts/              hash-password, probar-sql (app anterior), probar-taller
 ```
 Más contexto: `README.md` (instalación y funcionamiento) y `DECISIONES.md` (por qué se hizo cada cosa).

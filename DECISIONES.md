@@ -66,3 +66,54 @@
 10. **Procesos con formato básico** se escriben como texto con marcas simples (`## título`, `1. paso`, `- viñeta`, `**negrita**`)
     y se muestran armados; nunca se guarda HTML.
 11. **Fuera de alcance (preparado):** usuarios con permisos, visor 3D/DWG, QR por pieza, CNC, importación de Excel, clientes y facturación.
+
+---
+
+## Pedidos por QR y órdenes de producción (migración 0009)
+
+Basado en las fotos de las carpetas «Realizar pedidos» y «Órdenes de producción».
+
+1. **`/pedir` es público.** El solicitante no tiene la contraseña del equipo. Para que sea seguro: solo crea pedidos
+   «por recepcionar» por RPC (`crear_pedido`, transaccional), no muestra stock, limita a 10 pedidos por hora por IP y la
+   firma tiene que ser un PNG chico. Ver y cancelar el pedido se hace con un **token** al azar (link secreto), no con el número.
+   Las fotos de las cajas se sirven solo si son imágenes de una caja (`/pedir/foto/<id>`).
+2. **Pedido por pieza, no por caja.** Tabla nueva `pedido_piezas` (instrumental + caja desde la que se eligió). Los pedidos
+   viejos por caja (`pedido_items`) siguen andando: al finalizar descuentan cajas armadas.
+3. **Estados sin cambiar la base.** Se reusan los valores (`pendiente`, `en_produccion`, `listo`, `entregado`, `cancelado`)
+   con etiquetas nuevas: Por recepcionar, En producción, **Finalizado** (naranja), **Entregado** (verde), Cancelado.
+4. **Pieza terminada** = simple: stock terminado · set completo: juegos completos de medidas · compleja: **solo unidades
+   armadas** (las piezas sueltas son «stock de partes»; para sumar una compleja terminada hay que «Armar 1», que descuenta
+   1 de cada parte, como pide la foto).
+5. **Finalizar descuenta, firmar entrega.** «Armar pedido» → `finalizar_pedido` descuenta las piezas terminadas (todo o nada,
+   con la lista de faltantes). La firma de quien recibe (`firmar_pedido`) pasa a Entregado y habilita el remito.
+   Así el listado general solo suma órdenes en producción.
+6. **Cancelar** se permite desde las dos páginas hasta que se entrega. Si ya estaba finalizado, `cancelar_pedido` devuelve
+   el stock y lo deja en el historial (motivo «Pedido cancelado»).
+7. **Etapa del proceso** por pieza/parte: texto elegido de una lista editable (config `etapas`). No mueve stock.
+8. **Máquina y herramientas** (mechas, machos) como columnas por pieza y por parte; los comentarios largos van en Notas.
+   Se pueden subir programas de mecanizado (.txt, .nc, .gcode, .ngc, .tap, .cnc).
+9. **Avisos**: Telegram, WhatsApp (CallMeBot) y ntfy, todos opcionales por variables de entorno. Un aviso que falla nunca
+   rompe la acción. Resumen diario con Vercel Cron (`vercel.json`, 11:00 UTC = 8:00 en Argentina).
+10. **Colores de la marca InstrumentARG**: «AR» negro sobre celeste y «G» dorada sobre blanco (a confirmar con el dueño).
+
+---
+
+## Respuestas del dueño (migración 0010)
+
+1. **Marca:** «A» y «G» negras sobre celeste, «R» dorada sobre blanco.
+2. **Quién pide:** gente de la empresa (clientas internas, operarias, supervisoras). Por eso `/pedir` ya no es público:
+   necesita la clave del QR (`?k=`, en `taller.config`), que se cambia desde la app si se filtra.
+3. **Sets:** se piden enteros por defecto; se pueden personalizar sacando medidas (`pedido_piezas.componente_id`).
+4. **Información faltante:** `infoFaltante` (lib/calculos.ts) arma las preguntas; la pantalla «Info que falta» y los
+   recordatorios las muestran. Claude las carga por `/api/claude` cuando el dueño responde (dictado, texto o fotos).
+5. **Firma de recepción** en el celular del dueño: así se constata que la persona fue a buscar el material.
+6. **Cancelar** en cualquier momento salvo entregado, por el solicitante o por el taller; registro en «Cancelados».
+7. **Entregar parcial:** `entregar_parcial` descuenta lo elegido, guarda la entrega con su firma (`entregas`) y, si se
+   completó todo, pasa a entregado. Al finalizar o cancelar solo se cuenta lo que falta entregar. La regla de descuento
+   está una sola vez en SQL (`taller._necesidades`) y su espejo es `planFinalizarPedido`.
+8. **Avisos:** WhatsApp (CallMeBot). Resumen 6:40 y recordatorios 9:40 / 12:40 / 15:40. Se programan con **GitHub Actions**
+   (Vercel Hobby solo permite crons una vez por día y sin hora exacta). GitHub puede atrasarse unos minutos.
+9. **Acceso privado:** el taller es solo para los socios y quienes ellos inviten. Invitación = link de un solo uso (7 días).
+   Al ingresar con contraseña solo se elige a una persona habilitada; `quienSoy()` corta el acceso de las desactivadas.
+10. **Claude carga datos** por una API con clave propia (`CLAUDE_API_TOKEN`), nunca con la service_role en su equipo.
+11. **Investigación diaria** con una tarea programada de Claude: propone, el dueño aprueba con «Sí».

@@ -19,7 +19,7 @@ export async function prepararSubida(
   await quienSoy();
   if (!ENTIDADES.includes(entidad)) return { ok: false, error: "Destino no válido" };
   const ext = extension(nombre);
-  if (!EXTENSIONES_OK.includes(ext)) return { ok: false, error: `"${nombre}": tipo no permitido (PDF, DWG, STP/STEP o imagen).` };
+  if (!EXTENSIONES_OK.includes(ext)) return { ok: false, error: `"${nombre}": tipo no permitido (PDF, DWG, STP/STEP, imagen o programa .txt/.nc/.gcode/.tap).` };
   if (tamano > TAMANO_MAX) return { ok: false, error: `"${nombre}" pesa más de 50 MB.` };
   const ruta = `taller/${entidad}/${entidadId}/${Date.now()}-${slug(nombre)}`;
   const { data, error } = await db().storage.from(BUCKET).createSignedUploadUrl(ruta);

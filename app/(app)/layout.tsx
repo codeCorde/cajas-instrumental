@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 const LINKS = [
   { href: "/", label: "Conteo de cajas" },
   { href: "/instrumental", label: "Instrumental" },
+  { href: "/produccion", label: "Producción" },
   { href: "/stock", label: "Stock" },
   { href: "/admin", label: "Administración" },
   { href: "/tareas", label: "Tareas" },

@@ -1,9 +1,11 @@
 import { listarMovimientos } from "@/lib/historial";
+import { quienSoy } from "@/lib/sesion-servidor";
 import { aCSV } from "@/lib/csv";
 import { fechaHora } from "@/lib/formato";
 import { CAMPO_LABEL, MOTIVO_LABEL } from "@/lib/tipos";
 
 export async function GET(req: Request) {
+  await quienSoy();
   const p = new URL(req.url).searchParams;
   const movs = await listarMovimientos({
     desde: p.get("desde") ?? undefined,
