@@ -40,6 +40,7 @@ tests/calculos.test.ts   tests de los cálculos
 4. **Project Settings → API**: copiar URL, `anon` key y `service_role` key.
 
 > Vercel **no** corre migraciones: cada migración nueva se pega en el SQL Editor (avisalo en el PR).
+> Con `SUPABASE_ACCESS_TOKEN` en `.env.local` también se puede aplicar desde la compu: `node --env-file=.env.local scripts/sql-supabase.mjs supabase/migrations/00XX_….sql`.
 
 ## 3. Variables de entorno
 
