@@ -11,6 +11,7 @@ export interface Caja {
   descripcion: string | null;
   foto_path: string | null;
   cajas_armadas: number;
+  stock_minimo: number;
   orden: number;
   activa: boolean;
 }
@@ -284,4 +285,30 @@ export interface Mensaje {
   autor: string;
   texto: string;
   creado_en: string;
+}
+
+/** Orden interna para volver al stock de emergencia (mínimo de cajas armadas). No es un pedido de cliente. */
+export interface OrdenReposicion {
+  id: string;
+  numero: string;
+  caja_id: string;
+  cantidad: number;
+  estado: "abierta" | "cumplida" | "cancelada";
+  autor: string;
+  creado_en: string;
+  cerrada_en: string | null;
+}
+
+/** Proceso de fabricación de una pieza (o de una parte / medida si componente_id no es null). */
+export interface Proceso {
+  id: string;
+  instrumental_id: string;
+  componente_id: string | null;
+  orden: number;
+  nombre: string;
+  maquina: string | null;
+  minutos_pieza: number;
+  minutos_preparacion: number;
+  tercerizado: boolean;
+  notas: string | null;
 }

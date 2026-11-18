@@ -117,3 +117,16 @@ Basado en las fotos de las carpetas «Realizar pedidos» y «Órdenes de producc
    Al ingresar con contraseña solo se elige a una persona habilitada; `quienSoy()` corta el acceso de las desactivadas.
 10. **Claude carga datos** por una API con clave propia (`CLAUDE_API_TOKEN`), nunca con la service_role en su equipo.
 11. **Investigación diaria** con una tarea programada de Claude: propone, el dueño aprueba con «Sí».
+
+---
+
+## Stock de emergencia, procesos y lo que viene (migración 0011)
+
+1. **Stock de emergencia:** 10 cajas armadas de cada tipo como mínimo. Las órdenes de reposición (RE-…) son internas y separadas
+   de los pedidos (OP-…): no usan su numeración, no piden firma y no descuentan stock. Se crean solas por lo que falta y se
+   cumplen solas al volver al mínimo. Regla en SQL (`revisar_stock_emergencia`) con espejo en `faltanteEmergencia`.
+2. **Procesos por pieza** (no un tiempo total): cada proceso con máquina, minutos por pieza y de preparación. Así el costeo
+   futuro puede calcular piezas por hora, el costo de una parte, de una pieza compleja y de la caja completa.
+3. **Lo que viene (pedido por el dueño):** app de costeo (costo de 1 pieza y producción por hora) y un agente de atención al
+   cliente que arme cotizaciones a partir del pedido; si el cliente acepta precio y forma de pago, el pedido pasa a la app del
+   taller para fabricar. Se usan los procesos y tiempos de esta migración.

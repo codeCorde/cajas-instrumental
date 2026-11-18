@@ -6,6 +6,7 @@ import { cargarFaltantes } from "@/lib/faltantes";
 import { cargarPedidos } from "@/lib/pedidos";
 import { EXTENSIONES_OK, TAMANO_MAX, extension, slug } from "@/lib/formato";
 import { TIPOS_NOTA } from "@/lib/tipos";
+import { ordenesReposicionAbiertas, revisarStockEmergencia } from "@/lib/emergencia";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
  * stock, pedidos). Protegida con CLAUDE_API_TOKEN (solo servidor). Todo queda con autor «Claude» en el historial y en Novedades.
  * El stock se mueve SOLO por RPC, igual que en la app.
  *
- *   GET  ?que=faltantes | catalogo | pedidos
+ *   GET  ?que=faltantes | catalogo | pedidos | emergencia | procesos
  *   POST { accion: "ajustar_stock", objetivo, id, delta, motivo?, nota? }
  *        { accion: "armar_instrumental", id }
  *        { accion: "datos", tabla: "instrumentales"|"componentes", id, campos: { maquina?, herramientas?, etapa?, proceso?, descripcion? } }
@@ -23,6 +24,8 @@ export const dynamic = "force-dynamic";
  *        { accion: "crear_pedido", solicitante, items: [{ instrumental_id, caja_id?, componente_id?, cantidad }] }
  *        { accion: "preparar_subida", entidad, entidad_id, nombre, tamano }  → { ruta, url } (PUT del archivo a url)
  *        { accion: "confirmar_subida", entidad, entidad_id, nombre, tamano, ruta }
+ *        { accion: "proceso", instrumental_id, componente_id?, nombre, maquina?, minutos_pieza?, minutos_preparacion?, tercerizado?, notas? }
+ *        { accion: "minimo", caja_id, minimo }   (stock de emergencia: cajas armadas mínimas)
  */
 const AUTOR = "Claude";
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -74,6 +77,11 @@ export async function GET(req: Request) {
     });
   }
   if (que === "pedidos") return NextResponse.json({ ok: true, pedidos: await cargarPedidos(["pendiente", "en_produccion", "listo"]) });
+  if (que === "emergencia") {
+    const cajas = sinError(await db().from("cajas").select("id, codigo, nombre, cajas_armadas, stock_minimo").eq("activa", true).order("orden"));
+    return NextResponse.json({ ok: true, cajas, ordenes: await ordenesReposicionAbiertas() });
+  }
+  if (que === "procesos") return NextResponse.json({ ok: true, procesos: sinError(await db().from("procesos").select("*").order("instrumental_id").order("orden")) });
   return error("«que» no válido");
 }
 
@@ -101,7 +109,42 @@ export async function POST(req: Request) {
             p_caja_id: null,
           }),
         );
+        if (b.objetivo === "cajas_armadas") await revisarStockEmergencia(AUTOR);
         return NextResponse.json({ ok: true, stock: r });
+      }
+      case "proceso": {
+        const nombre = String(b.nombre ?? "").trim().slice(0, 80);
+        if (!nombre) throw new Error("Falta el nombre del proceso");
+        const min = (v: unknown, k: string) => {
+          const n = v === undefined || v === null || v === "" ? 0 : Number(String(v).replace(",", "."));
+          if (!Number.isFinite(n) || n < 0) throw new Error(`${k} tiene que ser un número ≥ 0`);
+          return Math.round(n * 100) / 100;
+        };
+        const inst = uuid(b.instrumental_id, "instrumental_id");
+        const { count } = await db().from("procesos").select("id", { count: "exact", head: true }).eq("instrumental_id", inst);
+        sinError(
+          await db().from("procesos").insert({
+            instrumental_id: inst,
+            componente_id: b.componente_id ? uuid(b.componente_id, "componente_id") : null,
+            orden: (count ?? 0) + 1,
+            nombre,
+            maquina: typeof b.maquina === "string" && b.maquina.trim() ? b.maquina.trim().slice(0, 120) : null,
+            minutos_pieza: min(b.minutos_pieza, "minutos_pieza"),
+            minutos_preparacion: min(b.minutos_preparacion, "minutos_preparacion"),
+            tercerizado: b.tercerizado === true,
+            notas: typeof b.notas === "string" && b.notas.trim() ? b.notas.trim().slice(0, 500) : null,
+          }),
+        );
+        const r = sinError(await db().from("instrumentales").select("nombre").eq("id", inst).single()) as { nombre: string };
+        await novedad(`Proceso «${nombre}» en ${r.nombre}`);
+        return NextResponse.json({ ok: true });
+      }
+      case "minimo": {
+        const n = Number(b.minimo);
+        if (!Number.isInteger(n) || n < 0) throw new Error("minimo tiene que ser un entero ≥ 0");
+        const c = sinError(await db().from("cajas").update({ stock_minimo: n }).eq("id", uuid(b.caja_id, "caja_id")).select("nombre").single()) as { nombre: string };
+        await novedad(`Stock de emergencia de ${c.nombre}: mínimo ${n}`);
+        return NextResponse.json({ ok: true, revision: await revisarStockEmergencia(AUTOR) });
       }
       case "armar_instrumental": {
         const r = sinError(await db().rpc("armar_instrumental", { p_instrumental: uuid(b.id, "id"), p_autor: AUTOR }));

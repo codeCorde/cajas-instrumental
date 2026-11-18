@@ -15,6 +15,8 @@ import {
   resumenCaja,
   stockCompleto,
   type InstCalc,
+  faltanteEmergencia,
+  tiemposProcesos,
 } from "@/lib/calculos";
 
 let n = 0;
@@ -258,5 +260,30 @@ describe("terminadas de una línea", () => {
     const m: InstCalc = { ...medidas({}), componentes: [comp("medida", "Ø44", 5, 2), comp("medida", "Ø46", 1, 1)] };
     expect(terminadasLinea(m, m.componentes[0].id)).toBe(2);
     expect(terminadasLinea(m)).toBe(1);
+  });
+});
+
+describe("stock de emergencia", () => {
+  it("sin cajas armadas y sin órdenes: pide las 10", () => {
+    expect(faltanteEmergencia(10, 0, 0)).toEqual({ faltan: 10, aPedir: 10, estado: "falta" });
+  });
+  it("con una orden abierta que cubre lo que falta: en reposición, no pide más", () => {
+    expect(faltanteEmergencia(10, 3, 10)).toEqual({ faltan: 7, aPedir: 0, estado: "en_reposicion" });
+  });
+  it("una entrega deja 7 de 10 sin órdenes: pide 3 (igual que la prueba SQL)", () => {
+    expect(faltanteEmergencia(10, 7, 0)).toEqual({ faltan: 3, aPedir: 3, estado: "falta" });
+  });
+  it("con más armadas que el mínimo: cubierto", () => {
+    expect(faltanteEmergencia(10, 12, 0)).toEqual({ faltan: 0, aPedir: 0, estado: "ok" });
+  });
+});
+
+describe("tiempos de procesos", () => {
+  it("suma los procesos y calcula piezas por hora y el lote", () => {
+    const t = tiemposProcesos([{ minutos_pieza: 4.5, minutos_preparacion: 30 }, { minutos_pieza: 1.5, minutos_preparacion: 10 }], 10);
+    expect(t).toEqual({ minutosPieza: 6, minutosPreparacion: 40, piezasPorHora: 10, minutosLote: 100 });
+  });
+  it("sin tiempos cargados no inventa piezas por hora", () => {
+    expect(tiemposProcesos([]).piezasPorHora).toBeNull();
   });
 });

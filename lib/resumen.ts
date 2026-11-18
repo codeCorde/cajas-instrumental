@@ -2,7 +2,8 @@ import "server-only";
 import { db } from "./db";
 import { cargarCatalogo, composicionDe } from "./datos";
 import { cargarPedidos, nombreLinea } from "./pedidos";
-import { ESTADO_TERMINADAS_INFO, estadoTerminadasCaja, listadoGeneral, terminadasLinea } from "./calculos";
+import { ESTADO_EMERGENCIA_INFO, ESTADO_TERMINADAS_INFO, estadoTerminadasCaja, faltanteEmergencia, listadoGeneral, terminadasLinea } from "./calculos";
+import { ordenesReposicionAbiertas } from "./emergencia";
 import { urlApp } from "./notificar";
 import { cargarFaltantes, elegirPreguntas } from "./faltantes";
 
@@ -41,6 +42,17 @@ export async function armarResumenDiario(): Promise<{ titulo: string; texto: str
   for (const c of cat.cajas) {
     const e = estadoTerminadasCaja(composicionDe(cat, c.id));
     l.push(`  ${ESTADO_TERMINADAS_INFO[e].icono} ${c.nombre}: ${ESTADO_TERMINADAS_INFO[e].label.toLowerCase()}`);
+  }
+  const reposicion = await ordenesReposicionAbiertas();
+  const conMinimo = cat.cajas.filter((c) => c.stock_minimo > 0);
+  if (conMinimo.length) {
+    l.push("");
+    l.push("🛟 Stock de emergencia (cajas armadas / mínimo):");
+    for (const c of conMinimo) {
+      const abiertas = reposicion.filter((o) => o.caja_id === c.id);
+      const e = faltanteEmergencia(c.stock_minimo, c.cajas_armadas, abiertas.reduce((s, o) => s + o.cantidad, 0));
+      l.push(`  ${ESTADO_EMERGENCIA_INFO[e.estado].icono} ${c.nombre}: ${c.cajas_armadas} de ${c.stock_minimo}${abiertas.length ? ` · en reposición: ${abiertas.map((o) => o.numero).join(", ")}` : ""}`);
+    }
   }
   l.push("");
   l.push((movs.count ?? 0) === 0 ? "⚠ Nadie cargó stock en las últimas 24 h. ¿Hay algo para cargar hoy?" : `Movimientos de stock en 24 h: ${movs.count}`);

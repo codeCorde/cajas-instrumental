@@ -42,6 +42,7 @@ await db.exec(leer("supabase/migrations/0008_taller_datos.sql")); console.log("o
 await err(leer("supabase/migrations/0008_taller_datos.sql"), "0008 no se puede correr dos veces");
 await db.exec(leer("supabase/migrations/0009_pedidos_qr_y_ordenes.sql")); console.log("ok    0009_pedidos_qr_y_ordenes.sql");
 await db.exec(leer("supabase/migrations/0010_sets_y_entrega_parcial.sql")); console.log("ok    0010_sets_y_entrega_parcial.sql");
+await db.exec(leer("supabase/migrations/0011_stock_emergencia_y_procesos.sql")); console.log("ok    0011_stock_emergencia_y_procesos.sql");
 
 // ---------- datos iniciales ----------
 ok((await q1(`select count(*)::int n from taller.cajas`)).n === 3, "3 cajas");
@@ -69,6 +70,9 @@ await err(`select taller.crear_pedido('x', '[]'::jsonb)`, "authenticated no crea
 await err(`select * from taller.entregas`, "authenticated no lee las entregas");
 await err(`select * from taller.invitaciones`, "authenticated no lee las invitaciones");
 await err(`select taller.entregar_parcial(gen_random_uuid(), 'x', '[]'::jsonb, 'x', 'x')`, "authenticated no entrega");
+await err(`select * from taller.ordenes_reposicion`, "authenticated no lee las órdenes de reposición");
+await err(`select * from taller.procesos`, "authenticated no lee los procesos");
+await err(`select taller.revisar_stock_emergencia('x')`, "authenticated no revisa el stock de emergencia");
 await db.exec(`reset role; set role service_role;`);
 
 // ---------- RPC ----------
@@ -264,6 +268,30 @@ const vieja = (await q1(`insert into taller.invitaciones (nombre, creada_por, ve
 await err(`select taller.aceptar_invitacion('${vieja}')`, "una invitación vencida no sirve");
 await err(`select taller.aceptar_invitacion(gen_random_uuid())`, "un token inventado no sirve");
 ok(((await q1(`select valor->>'clave' k from taller.config where clave='pedir'`)).k ?? "").length === 32, "el QR de pedidos tiene clave secreta");
+}
+{
+// ---------- 0011: stock de emergencia ----------
+const re = await filas(`select c.codigo, o.cantidad, o.estado, o.numero from taller.ordenes_reposicion o join taller.cajas c on c.id = o.caja_id order by o.numero`);
+ok(re.length === 3 && re.every((x) => x.cantidad === 10 && x.estado === "abierta"), "la migración crea 3 órdenes de reposición de 10 cajas");
+ok(re[0].numero === "RE-0001", "las órdenes de reposición se numeran RE-0001…");
+const r0 = (await q1(`select taller.revisar_stock_emergencia('Ana') r`)).r;
+ok(r0.creadas.length === 0, "revisar de nuevo no duplica órdenes");
+const dm = (await q1(`select id from taller.cajas where codigo='DM'`)).id;
+await db.exec(`update taller.cajas set cajas_armadas = 10 where id='${dm}'`);
+const r1 = (await q1(`select taller.revisar_stock_emergencia('Ana') r`)).r;
+ok(r1.cumplidas.length === 1 && r1.creadas.length === 0, "al llegar a 10 armadas, la orden de DM queda cumplida");
+await db.exec(`update taller.cajas set cajas_armadas = 7 where id='${dm}'`);
+const r2 = (await q1(`select taller.revisar_stock_emergencia('Ana') r`)).r;
+ok(r2.creadas.length === 1 && r2.creadas[0].cantidad === 3, "si una entrega deja 7 de 10, crea una orden por 3");
+await db.exec(`update taller.cajas set stock_minimo = 0 where id='${dm}'`);
+const r3 = (await q1(`select taller.revisar_stock_emergencia('Ana') r`)).r;
+ok(r3.cumplidas.length === 1, "si el mínimo baja a 0, se cierra la orden abierta");
+await err(`update taller.cajas set stock_minimo = -1 where id='${dm}'`, "el mínimo no puede ser negativo");
+// ---------- 0011: procesos ----------
+const inst = (await q1(`select id from taller.instrumentales limit 1`)).id;
+await db.exec(`insert into taller.procesos (instrumental_id, nombre, maquina, minutos_pieza, minutos_preparacion) values ('${inst}','Torneado','Torno CNC',4.5,30)`);
+ok((await q1(`select count(*)::int n from taller.procesos where instrumental_id='${inst}'`)).n === 1, "se carga un proceso con tiempos");
+await err(`insert into taller.procesos (instrumental_id, nombre, minutos_pieza) values ('${inst}','X',-1)`, "los minutos no pueden ser negativos");
 }
 console.log(fallas ? `\n${fallas} FALLAS` : "\nTODO OK");
 process.exit(fallas ? 1 : 0);
