@@ -23,9 +23,9 @@ En Windows, si PowerShell bloquea `npm`/`npx`, usar `npm.cmd` / `npx.cmd`.
 2. **Cálculos solo en `lib/calculos.ts`** (stock completo, estados, cajas que alcanza, qué fabricar). Funciones puras con tests.
    Cualquier cambio de cálculo lleva su test en `tests/calculos.test.ts`.
 3. **El stock solo cambia por RPC** (`taller.ajustar_stock`, `armar_instrumental`, `armar_caja`, `desarmar_caja`,
-   `entregar_pedido` en `0007_taller.sql`; `finalizar_pedido`, `entregar_parcial`, `cancelar_pedido` en `0010_sets_y_entrega_parcial.sql`, con la regla en `taller._necesidades`), llamadas desde `app/(app)/acciones-stock.ts`.
+   `entregar_pedido` en `0007_taller.sql`; `finalizar_pedido`, `entregar_parcial`, `cancelar_pedido` en `0010_sets_y_entrega_parcial.sql`, con la regla en `taller._necesidades`; `revisar_stock_emergencia` en `0011`), llamadas desde `app/(app)/acciones-stock.ts`.
    Nunca hacer `update ... set stock = ...` desde la app. El historial (`movimientos`) es solo inserción.
-4. **Reglas duplicadas a propósito**: `taller.armar_caja` ↔ `planArmadoCaja` y `taller.finalizar_pedido` ↔ `planFinalizarPedido` (vista previa en `lib/calculos.ts`).
+4. **Reglas duplicadas a propósito**: `taller.armar_caja` ↔ `planArmadoCaja`, `taller.finalizar_pedido` ↔ `planFinalizarPedido` y `taller.revisar_stock_emergencia` ↔ `faltanteEmergencia` (vista previa en `lib/calculos.ts`).
    Si cambia una, cambia la otra; `tests/calculos.test.ts` y `scripts/probar-taller.mjs` prueban el mismo caso.
 5. **Acceso**: contraseña única (`APP_PASSWORD_HASH`) + nombre elegido, en cookie firmada (`lib/sesion.ts`, `middleware.ts`).
    No hay roles, pero el taller es **privado**: solo personas habilitadas por invitación (`taller.invitaciones`, `quienSoy()` revisa que la persona esté activa).
@@ -51,8 +51,8 @@ app/taller/[codigo]    vista del QR (celular)      app/ingresar/  contraseña + 
 lib/calculos.ts       ★ lógica de negocio y regla de armado (vista previa)
 lib/datos.ts          lecturas      lib/db.ts  cliente service_role (esquema taller)
 lib/pedidos.ts        lecturas de pedidos      lib/notificar.ts  avisos (WhatsApp CallMeBot / Telegram / ntfy)      lib/resumen.ts  resumen 6:40 y recordatorios
-lib/faltantes.ts      información que falta cargar      app/api/claude  API para que Claude cargue datos (scripts/claude-api.mjs)      .github/workflows/avisos.yml  horarios de los avisos
-supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos · 0005 novedades y tareas · 0006 chat · 0007 esquema taller · 0008 datos · 0009 pedidos QR · 0010 sets, parciales, invitaciones       supabase/seed.sql  datos de ejemplo
+lib/emergencia.ts     stock de emergencia (mínimo de cajas armadas → órdenes de reposición RE-…)      lib/faltantes.ts      información que falta cargar      app/api/claude  API para que Claude cargue datos (scripts/claude-api.mjs)      .github/workflows/avisos.yml  horarios de los avisos
+supabase/migrations/  0001 tablas · 0002 RLS · 0003 RPC · 0004 planos · 0005 novedades y tareas · 0006 chat · 0007 esquema taller · 0008 datos · 0009 pedidos QR · 0010 sets, parciales, invitaciones · 0011 stock de emergencia y procesos       supabase/seed.sql  datos de ejemplo
 scripts/              hash-password, probar-sql (app anterior), probar-taller
 ```
 Más contexto: `README.md` (instalación y funcionamiento) y `DECISIONES.md` (por qué se hizo cada cosa).

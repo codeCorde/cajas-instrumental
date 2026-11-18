@@ -6,6 +6,7 @@ import { quienSoy } from "@/lib/sesion-servidor";
 import { registrarNovedad } from "@/lib/datos";
 import { seguro, texto, textoONull } from "@/lib/acciones";
 import { notificar, urlApp } from "@/lib/notificar";
+import { revisarStockEmergencia } from "@/lib/emergencia";
 import type { ResultadoAccion } from "@/components/FormAccion";
 
 async function numeroDe(id: string): Promise<{ numero: string; cliente: string }> {
@@ -39,6 +40,7 @@ export async function finalizarPedido(id: string): Promise<ResultadoAccion> {
     if (!r.ok) throw new Error(`Faltan piezas terminadas: ${(r.faltantes ?? []).join("; ")}`);
     const p = await numeroDe(id);
     await registrarNovedad(yo, "pedidos", `Pedido ${p.numero} finalizado (armado)`, "Se descontaron las piezas terminadas. Falta la firma de quien recibe.");
+    await revisarStockEmergencia(yo);
     await notificar(`📦 Pedido ${p.numero} finalizado`, `Armado por ${yo}. Falta la firma de ${p.cliente} para entregarlo.`, urlApp(`/produccion/pedido/${id}`));
     return { mensaje: "Pedido finalizado: falta la firma" };
   });
@@ -66,6 +68,7 @@ export async function cancelarPedido(id: string, fd: FormData): Promise<Resultad
     if (error) throw new Error(error.message);
     const p = await numeroDe(id);
     await registrarNovedad(yo, "pedidos", `Pedido ${p.numero} cancelado`, motivo);
+    await revisarStockEmergencia(yo);
     await notificar(`✕ Pedido ${p.numero} cancelado`, `${yo} canceló el pedido de ${p.cliente}.${motivo ? ` Motivo: ${motivo}` : ""}`, urlApp(`/produccion/pedido/${id}`));
     return { mensaje: "Pedido cancelado" };
   });
@@ -142,5 +145,73 @@ export async function entregarParcial(id: string, datos: { items: { pieza_id: st
     await registrarNovedad(yo, "pedidos", `Pedido ${p.numero}: entrega parcial de ${total} piezas`, `Recibió: ${datos.recibio}${r.completo ? " · con esto se completó el pedido" : ""}`);
     await notificar(`📦 Entrega parcial ${p.numero}`, `${total} piezas para ${datos.recibio}.${r.completo ? " El pedido quedó completo." : ""}`, urlApp(`/produccion/pedido/${id}`));
     return { mensaje: r.completo ? "Entregado: se completó el pedido" : "Entrega parcial registrada" };
+  });
+}
+
+// ---------------- Stock de emergencia ----------------
+
+/** Cambia el mínimo de cajas armadas de una caja y revisa enseguida si hace falta una orden de reposición. */
+export async function guardarMinimo(cajaId: string, fd: FormData): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    const n = Number(texto(fd, "minimo"));
+    if (!Number.isInteger(n) || n < 0 || n > 10000) throw new Error("El mínimo tiene que ser un número entero de 0 en adelante.");
+    const c = sinError(await db().from("cajas").update({ stock_minimo: n }).eq("id", cajaId).select("nombre").single()) as { nombre: string };
+    await registrarNovedad(yo, "cajas", `Stock de emergencia de ${c.nombre}: mínimo ${n}`);
+    await revisarStockEmergencia(yo);
+    return { mensaje: `Mínimo de ${c.nombre}: ${n}` };
+  });
+}
+
+export async function revisarEmergenciaAhora(): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    const r = await revisarStockEmergencia(yo);
+    if (!r) throw new Error("No se pudo revisar el stock de emergencia.");
+    return { mensaje: r.creadas.length ? `Se crearon ${r.creadas.length} órdenes de reposición` : "Revisado: no hace falta ninguna orden nueva" };
+  });
+}
+
+// ---------------- Procesos y tiempos ----------------
+
+const minutos = (fd: FormData, k: string) => {
+  const v = texto(fd, k).replace(",", ".");
+  if (v === "") return 0;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) throw new Error("Los minutos tienen que ser un número de 0 en adelante (podés usar decimales: 4,5).");
+  return Math.round(n * 100) / 100;
+};
+
+export async function agregarProceso(instrumentalId: string, fd: FormData): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    const yo = await quienSoy();
+    const nombre = texto(fd, "nombre").slice(0, 80);
+    if (!nombre) throw new Error("Poné el nombre del proceso (ej.: Torneado).");
+    const componenteId = textoONull(fd, "componente_id");
+    const { count } = await db().from("procesos").select("id", { count: "exact", head: true }).eq("instrumental_id", instrumentalId);
+    const { data: i } = await db().from("instrumentales").select("nombre").eq("id", instrumentalId).single();
+    sinError(
+      await db().from("procesos").insert({
+        instrumental_id: instrumentalId,
+        componente_id: componenteId,
+        orden: (count ?? 0) + 1,
+        nombre,
+        maquina: textoONull(fd, "maquina"),
+        minutos_pieza: minutos(fd, "minutos_pieza"),
+        minutos_preparacion: minutos(fd, "minutos_preparacion"),
+        tercerizado: fd.get("tercerizado") === "on",
+        notas: textoONull(fd, "notas"),
+      }),
+    );
+    await registrarNovedad(yo, "instrumental", `Proceso «${nombre}» en ${i?.nombre ?? "una pieza"}`);
+    return { mensaje: "Proceso agregado" };
+  });
+}
+
+export async function borrarProceso(id: string): Promise<ResultadoAccion> {
+  return seguro(async () => {
+    await quienSoy();
+    sinError(await db().from("procesos").delete().eq("id", id));
+    return { mensaje: "Proceso borrado" };
   });
 }

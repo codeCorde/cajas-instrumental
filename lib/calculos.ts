@@ -422,3 +422,47 @@ export function terminadasLinea(inst: InstCalc, componenteId?: string | null): n
   const c = inst.componentes.find((x) => x.id === componenteId);
   return c ? Math.floor(c.stock / c.cant_por_unidad) : 0;
 }
+
+// ---------------- Stock de emergencia ----------------
+// Espejo de taller.revisar_stock_emergencia (0011): si cambia una, cambia la otra.
+
+export type EstadoEmergencia = "ok" | "en_reposicion" | "falta";
+
+export const ESTADO_EMERGENCIA_INFO: Record<EstadoEmergencia, { label: string; icono: string; clase: string }> = {
+  ok: { label: "Mínimo cubierto", icono: "✓", clase: "text-disponible" },
+  en_reposicion: { label: "En reposición", icono: "◐", clase: "text-proceso" },
+  falta: { label: "Falta pedir", icono: "✕", clase: "text-falta" },
+};
+
+/**
+ * Stock de emergencia de una caja. `faltan` = cajas armadas que faltan para el mínimo;
+ * `aPedir` = lo que todavía no está en ninguna orden de reposición abierta (lo que la app pide sola).
+ */
+export function faltanteEmergencia(minimo: number, armadas: number, enOrdenes: number): { faltan: number; aPedir: number; estado: EstadoEmergencia } {
+  const faltan = Math.max(0, minimo - armadas);
+  const aPedir = Math.max(0, faltan - enOrdenes);
+  return { faltan, aPedir, estado: faltan === 0 ? "ok" : aPedir === 0 ? "en_reposicion" : "falta" };
+}
+
+// ---------------- Procesos y tiempos (base del costeo) ----------------
+
+export interface ProcesoCalc {
+  minutos_pieza: number;
+  minutos_preparacion: number;
+}
+
+/**
+ * Tiempos de una pieza (o parte) según sus procesos: minutos por pieza (suma), preparación (suma),
+ * piezas por hora sin contar la preparación y minutos para hacer un lote de `cantidad` piezas.
+ */
+export function tiemposProcesos(procesos: ProcesoCalc[], cantidad = 1): { minutosPieza: number; minutosPreparacion: number; piezasPorHora: number | null; minutosLote: number } {
+  const minutosPieza = procesos.reduce((s, p) => s + Number(p.minutos_pieza || 0), 0);
+  const minutosPreparacion = procesos.reduce((s, p) => s + Number(p.minutos_preparacion || 0), 0);
+  const n = Math.max(0, Math.trunc(cantidad));
+  return {
+    minutosPieza: Math.round(minutosPieza * 100) / 100,
+    minutosPreparacion: Math.round(minutosPreparacion * 100) / 100,
+    piezasPorHora: minutosPieza > 0 ? Math.floor((60 / minutosPieza) * 10) / 10 : null,
+    minutosLote: Math.round((minutosPreparacion + minutosPieza * n) * 100) / 100,
+  };
+}

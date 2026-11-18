@@ -2,16 +2,17 @@ import Link from "next/link";
 import { db, sinError } from "@/lib/db";
 import { archivosDe, cargarCatalogo, composicionDe, usosDe } from "@/lib/datos";
 import { leerEtapas } from "@/lib/pedidos";
-import { componentesDe, nombreComponente } from "@/lib/calculos";
+import { componentesDe, nombreComponente, tiemposProcesos } from "@/lib/calculos";
 import { fechaHora } from "@/lib/formato";
-import { TIPOS_NOTA, type Instrumental, type Nota, type TipoInstrumental } from "@/lib/tipos";
+import { TIPOS_NOTA, type Instrumental, type Nota, type Proceso, type TipoInstrumental } from "@/lib/tipos";
+import BotonAccion from "@/components/BotonAccion";
 import Archivos from "@/components/Archivos";
 import ControlStock from "@/components/ControlStock";
 import FormAccion from "@/components/FormAccion";
 import { Compartido } from "@/components/Estado";
 import TextoFormato from "@/components/TextoFormato";
 import { agregarNota } from "../../instrumental/acciones";
-import { guardarDatosTaller, guardarEtapas } from "../acciones";
+import { agregarProceso, borrarProceso, guardarDatosTaller, guardarEtapas } from "../acciones";
 import SelectorEtapa from "./SelectorEtapa";
 
 export const dynamic = "force-dynamic";
@@ -90,10 +91,11 @@ export default async function PartesPage({ searchParams }: { searchParams: Promi
 
 async function DetallePieza({ inst, etapas, usos }: { inst: Instrumental; etapas: string[]; usos: string[] }) {
   const partes = componentesDe(inst) as Instrumental["componentes"];
-  const [archivos, archivosPartes, notas] = await Promise.all([
+  const [archivos, archivosPartes, notas, procesos] = await Promise.all([
     archivosDe("instrumental", [inst.id]),
     archivosDe("componente", partes.map((p) => p.id)),
     db().from("notas").select("*").eq("instrumental_id", inst.id).order("creado_en", { ascending: false }).then((r) => sinError(r) as Nota[]),
+    db().from("procesos").select("*").eq("instrumental_id", inst.id).order("orden").then((r) => sinError(r) as Proceso[]),
   ]);
   const cl = CLASIFICACION[inst.tipo];
 
@@ -183,6 +185,113 @@ async function DetallePieza({ inst, etapas, usos }: { inst: Instrumental; etapas
             </div>
           </details>
         ))}
+      </section>
+
+      {/* Procesos y tiempos */}
+      <section className="card p-4 space-y-3">
+        <h3 className="titulo text-2xl">Procesos y tiempos de mecanizado</h3>
+        <p className="text-sm text-tenue">
+          Cada proceso en orden, con su máquina, los minutos por pieza y los de preparación de la máquina. Con esto la app calcula cuántas piezas
+          salen por hora (y más adelante, el costo).
+        </p>
+        {[{ id: null as string | null, nombre: inst.tipo === "simple" ? inst.nombre : "Pieza completa (armado / terminación)" }, ...partes.map((p) => ({ id: p.id as string | null, nombre: nombreComponente(p) }))]
+          .map((d) => ({ ...d, lista: procesos.filter((x) => x.componente_id === d.id) }))
+          .filter((d) => d.lista.length > 0)
+          .map((d) => {
+            const t = tiemposProcesos(d.lista);
+            return (
+              <div key={d.id ?? "pieza"} className="space-y-1">
+                <p className="font-semibold">
+                  {d.nombre}{" "}
+                  <span className="text-sm font-normal text-tenue">
+                    · {t.minutosPieza} min por pieza{t.minutosPreparacion ? ` + ${t.minutosPreparacion} min de preparación` : ""}
+                    {t.piezasPorHora !== null && <strong className="text-texto"> · ≈ {t.piezasPorHora} piezas por hora</strong>}
+                  </span>
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="tabla">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Proceso</th>
+                        <th>Máquina</th>
+                        <th className="text-right">Min / pieza</th>
+                        <th className="text-right">Preparación</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {d.lista.map((x, i) => (
+                        <tr key={x.id}>
+                          <td className="font-mono text-tenue">{i + 1}</td>
+                          <td>
+                            {x.nombre}
+                            {x.tercerizado && <span className="ml-1 text-xs text-proceso">⇄ tercerizado</span>}
+                            {x.notas && <span className="block text-xs text-tenue">{x.notas}</span>}
+                          </td>
+                          <td className="text-sm">{x.maquina ?? "—"}</td>
+                          <td className="text-right font-mono">{Number(x.minutos_pieza)}</td>
+                          <td className="text-right font-mono">{Number(x.minutos_preparacion)}</td>
+                          <td className="text-right">
+                            <BotonAccion accion={borrarProceso.bind(null, x.id)} className="btn text-sm" confirmar={`¿Borrar el proceso «${x.nombre}»?`}>
+                              Borrar
+                            </BotonAccion>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        {procesos.length === 0 && <p className="text-sm text-tenue">Todavía no tiene procesos cargados.</p>}
+        <details className="border-t border-borde pt-2">
+          <summary className="cursor-pointer font-semibold">+ Agregar un proceso</summary>
+          <FormAccion accion={agregarProceso.bind(null, inst.id)} className="mt-2 grid gap-2 sm:grid-cols-2" textoBoton="Agregar proceso" ok="Proceso agregado">
+            {partes.length > 0 && (
+              <label className="sm:col-span-2">
+                <span className="etiqueta">¿De qué {inst.tipo === "medidas" ? "medida" : "parte"}?</span>
+                <select name="componente_id" className="campo" defaultValue="">
+                  <option value="">Pieza completa (armado / terminación)</option>
+                  {partes.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {nombreComponente(p)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label>
+              <span className="etiqueta">Proceso</span>
+              <input name="nombre" className="campo" placeholder="Torneado, fresado, roscado, pulido…" required list="procesos-sugeridos" />
+              <datalist id="procesos-sugeridos">
+                {["Corte", "Torneado", "Fresado", "Agujereado / roscado", "Tratamiento térmico", "Rectificado", "Pulido", "Grabado láser", "Pasivado", "Control de calidad"].map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+            </label>
+            <label>
+              <span className="etiqueta">Máquina</span>
+              <input name="maquina" className="campo" placeholder="Torno CNC, centro de mecanizado…" />
+            </label>
+            <label>
+              <span className="etiqueta">Minutos por pieza</span>
+              <input name="minutos_pieza" className="campo font-mono" inputMode="decimal" placeholder="4,5" />
+            </label>
+            <label>
+              <span className="etiqueta">Minutos de preparación (por lote)</span>
+              <input name="minutos_preparacion" className="campo font-mono" inputMode="decimal" placeholder="30" />
+            </label>
+            <label className="sm:col-span-2">
+              <span className="etiqueta">Notas</span>
+              <input name="notas" className="campo" placeholder="Programa O1234 · mecha Ø4,2 · se hace de a 4 piezas…" />
+            </label>
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
+              <input type="checkbox" name="tercerizado" /> Lo hace un tercero (tercerizado)
+            </label>
+          </FormAccion>
+        </details>
       </section>
 
       {/* Planos y programas */}

@@ -24,7 +24,7 @@ app/archivos/[id]        abre un archivo con link firmado de 10 min (?descargar 
 lib/calculos.ts      ★   lógica de negocio (stock completo, estados, cajas que alcanza, faltantes, armado, qué fabricar)
 lib/datos.ts             lecturas · lib/db.ts cliente service_role · lib/sesion.ts cookie firmada
 middleware.ts            todas las rutas piden sesión (salvo /pedir con clave, /api/cron y /api/claude con secreto)
-supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales · 0009 pedidos por QR y órdenes · 0010 sets, entrega parcial e invitaciones
+supabase/migrations/     0001–0006 app anterior (esquema public) · 0007 esquema taller · 0008 datos iniciales · 0009 pedidos por QR y órdenes · 0010 sets, entrega parcial e invitaciones · 0011 stock de emergencia y procesos
 scripts/                 hash-password, probar-sql (app anterior), probar-taller (app nueva)
 tests/calculos.test.ts   tests de los cálculos
 ```
@@ -32,7 +32,7 @@ tests/calculos.test.ts   tests de los cálculos
 ## 2. Supabase
 
 1. Crear el proyecto en <https://supabase.com>.
-2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0010). La 0008 carga el catálogo
+2. **SQL Editor**: correr en orden las migraciones de `supabase/migrations/` (0001 a 0011). La 0008 carga el catálogo
    inicial (todo con stock en 0, `cant_por_caja = 1` y marcado «A confirmar») y pasa los planos de la app anterior.
    Si Supabase avisa «tablas sin RLS», elegí **Run without RLS**: el script activa RLS en todas las tablas al final.
 3. **Integrations → Data API → Settings → Exposed schemas**: agregar `taller` y guardar.
@@ -142,6 +142,17 @@ Canales (cualquiera, o varios):
 - **ntfy** (push): instalá la app ntfy, suscribite a un tema difícil de adivinar y ponelo en `NTFY_TEMA`.
 
 Sin canales configurados no se manda nada (la app funciona igual).
+
+### Stock de emergencia (migración 0011)
+Cada caja tiene un **mínimo de cajas armadas** (arranca en 10), editable en **Producción → Órdenes → 🛟 Stock de emergencia**.
+Si las cajas armadas más lo que ya está en órdenes de reposición abiertas no llega al mínimo, la app crea sola una
+**orden de reposición** (RE-0001…, aparte de los pedidos OP-…) y avisa por Telegram. Se revisa después de armar, desarmar,
+finalizar o cancelar, y en el resumen de las 6:40. La orden queda cumplida cuando las cajas armadas vuelven al mínimo.
+«Qué fabricar» arma la lista de piezas para lo que falta.
+
+### Procesos y tiempos (base del costeo)
+En **Stock de partes**, cada pieza (o cada parte / medida) tiene sus procesos en orden con máquina, minutos por pieza y minutos
+de preparación. La app muestra cuántas piezas salen por hora. Es la base de la futura app de costeo.
 
 ### Acceso privado (solo por invitación)
 - Con la contraseña solo se puede elegir a una persona **habilitada**; ya no se crean nombres nuevos al ingresar

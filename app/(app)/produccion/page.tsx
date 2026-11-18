@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { cargarCatalogo, usosDe } from "@/lib/datos";
 import { cargarPedidos, nombreLinea } from "@/lib/pedidos";
-import { listadoGeneral, terminadasLinea, TIPO_LABEL } from "@/lib/calculos";
+import { ESTADO_EMERGENCIA_INFO, faltanteEmergencia, listadoGeneral, terminadasLinea, TIPO_LABEL } from "@/lib/calculos";
+import { ordenesReposicionAbiertas } from "@/lib/emergencia";
+import FormAccion from "@/components/FormAccion";
 import { fecha, fechaHora } from "@/lib/formato";
 import type { Pedido } from "@/lib/tipos";
 import BotonAccion from "@/components/BotonAccion";
 import { Compartido } from "@/components/Estado";
-import { recepcionarPedido } from "./acciones";
+import { guardarMinimo, recepcionarPedido, revisarEmergenciaAhora } from "./acciones";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,12 @@ const totalPiezas = (p: Pedido) => p.piezas.reduce((s, x) => s + x.cantidad - x.
  */
 export default async function OrdenesPage({ searchParams }: { searchParams: Promise<{ orden?: string }> }) {
   const { orden } = await searchParams;
-  const [cat, pendientes, ordenes] = await Promise.all([cargarCatalogo(), cargarPedidos(["pendiente"]), cargarPedidos(["en_produccion"], { col: "recepcionado_en" })]);
+  const [cat, pendientes, ordenes, reposicion] = await Promise.all([
+    cargarCatalogo(),
+    cargarPedidos(["pendiente"]),
+    cargarPedidos(["en_produccion"], { col: "recepcionado_en" }),
+    ordenesReposicionAbiertas(),
+  ]);
   const elegida = ordenes.find((o) => o.id === orden) ?? null;
   const mostrar = elegida ? [elegida] : ordenes;
   const listado = Object.entries(listadoGeneral(mostrar))
@@ -71,6 +78,75 @@ export default async function OrdenesPage({ searchParams }: { searchParams: Prom
             ))}
           </ul>
         )}
+      </section>
+
+      {/* Stock de emergencia */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="titulo text-2xl">🛟 Stock de emergencia</h2>
+            <p className="text-sm text-tenue">
+              Cajas completas y terminadas, listas para entregar. Si una entrega deja una caja por debajo del mínimo, la app crea sola una orden de
+              reposición y avisa por Telegram. La orden se cumple cuando las cajas armadas vuelven al mínimo.
+            </p>
+          </div>
+          <BotonAccion accion={revisarEmergenciaAhora} className="btn">
+            Revisar ahora
+          </BotonAccion>
+        </div>
+        <div className="overflow-x-auto card">
+          <table className="tabla">
+            <thead>
+              <tr>
+                <th>Caja</th>
+                <th className="text-right">Armadas</th>
+                <th>Mínimo</th>
+                <th>Estado</th>
+                <th>Órdenes de reposición</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cat.cajas.map((c) => {
+                const abiertas = reposicion.filter((o) => o.caja_id === c.id);
+                const enOrdenes = abiertas.reduce((s, o) => s + o.cantidad, 0);
+                const e = faltanteEmergencia(c.stock_minimo, c.cajas_armadas, enOrdenes);
+                const info = ESTADO_EMERGENCIA_INFO[e.estado];
+                return (
+                  <tr key={c.id}>
+                    <td className="font-semibold">{c.nombre}</td>
+                    <td className="text-right font-mono text-lg">{c.cajas_armadas}</td>
+                    <td>
+                      <FormAccion accion={guardarMinimo.bind(null, c.id)} className="flex items-center gap-2" limpiar={false} textoBoton="Guardar">
+                        <input name="minimo" type="number" min={0} inputMode="numeric" defaultValue={c.stock_minimo} className="campo w-20 font-mono" aria-label={`Mínimo de ${c.nombre}`} />
+                      </FormAccion>
+                    </td>
+                    <td className={`font-semibold ${info.clase}`}>
+                      {info.icono} {c.stock_minimo === 0 ? "Sin mínimo" : e.faltan === 0 ? info.label : `Faltan ${e.faltan}`}
+                    </td>
+                    <td className="text-sm">
+                      {abiertas.length === 0 ? (
+                        <span className="text-tenue">—</span>
+                      ) : (
+                        <ul className="space-y-1">
+                          {abiertas.map((o) => (
+                            <li key={o.id}>
+                              <span className="font-mono font-semibold">{o.numero}</span> · {o.cantidad} {o.cantidad === 1 ? "caja" : "cajas"} · desde {fecha(o.creado_en)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {e.faltan > 0 && (
+                        <Link href={`/stock/fabricar?caja=${c.id}&n=${e.faltan}`} className="underline text-acento">
+                          Qué fabricar para {e.faltan} {e.faltan === 1 ? "caja" : "cajas"} →
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {/* Órdenes en producción */}

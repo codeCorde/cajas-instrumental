@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { quienSoy } from "@/lib/sesion-servidor";
+import { revisarStockEmergencia } from "@/lib/emergencia";
 
 export type ObjetivoStock = "stock_terminado" | "unidades_armadas" | "stock" | "cajas_armadas";
 export type Respuesta<T = undefined> = { ok: true; valor: T } | { ok: false, error: string; faltantes?: string[] };
@@ -29,6 +30,7 @@ export async function ajustarStock(
     p_caja_id: opciones.cajaId ?? null,
   });
   if (error) return { ok: false, error: error.message };
+  if (objetivo === "cajas_armadas") await revisarStockEmergencia(autor);
   revalidatePath("/", "layout");
   return { ok: true, valor: data as number };
 }
@@ -47,6 +49,7 @@ export async function armarCaja(cajaId: string): Promise<Respuesta<number>> {
   if (error) return { ok: false, error: error.message };
   const r = data as { ok: boolean; cajas_armadas?: number; faltantes?: string[] };
   if (!r.ok) return { ok: false, error: "No se puede armar: falta instrumental", faltantes: r.faltantes ?? [] };
+  await revisarStockEmergencia(autor);
   revalidatePath("/", "layout");
   return { ok: true, valor: r.cajas_armadas ?? 0 };
 }
@@ -55,6 +58,7 @@ export async function desarmarCaja(cajaId: string): Promise<Respuesta<number>> {
   const autor = await quienSoy();
   const { data, error } = await db().rpc("desarmar_caja", { p_caja: cajaId, p_autor: autor });
   if (error) return { ok: false, error: error.message };
+  await revisarStockEmergencia(autor);
   revalidatePath("/", "layout");
   return { ok: true, valor: data as number };
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { armarRecordatorio, armarResumenDiario } from "@/lib/resumen";
 import { hayCanales, notificar, urlApp } from "@/lib/notificar";
+import { revisarStockEmergencia } from "@/lib/emergencia";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export async function GET(req: Request) {
   if (!hayCanales()) return NextResponse.json({ enviado: false, motivo: "No hay canales de aviso configurados" });
   const url = new URL(req.url);
   const tipo = url.searchParams.get("tipo") ?? "resumen";
+  if (tipo === "resumen") await revisarStockEmergencia("Claude"); // por si algo cambió el stock sin pasar por la app
   const msg = tipo === "recordatorio" ? await armarRecordatorio(url.searchParams.get("hora") ?? "") : await armarResumenDiario();
   if (!msg) return NextResponse.json({ enviado: false, motivo: "Nada pendiente" });
   const errores = await notificar(msg.titulo, msg.texto, urlApp("/produccion"));
