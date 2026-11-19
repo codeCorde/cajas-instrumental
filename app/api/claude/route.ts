@@ -7,6 +7,7 @@ import { cargarPedidos } from "@/lib/pedidos";
 import { EXTENSIONES_OK, TAMANO_MAX, extension, slug } from "@/lib/formato";
 import { TIPOS_NOTA } from "@/lib/tipos";
 import { ordenesReposicionAbiertas, revisarStockEmergencia } from "@/lib/emergencia";
+import { agregarPreguntaAviso } from "@/lib/preguntas";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,7 @@ export const dynamic = "force-dynamic";
  *        { accion: "confirmar_subida", entidad, entidad_id, nombre, tamano, ruta }
  *        { accion: "proceso", instrumental_id, componente_id?, nombre, maquina?, minutos_pieza?, minutos_preparacion?, tercerizado?, notas? }
  *        { accion: "minimo", caja_id, minimo }   (stock de emergencia: cajas armadas mínimas)
+ *        { accion: "pregunta_aviso", texto }      (sale UNA vez, dentro del próximo aviso programado)
  */
 const AUTOR = "Claude";
 const UUID = /^[0-9a-f-]{36}$/i;
@@ -138,6 +140,10 @@ export async function POST(req: Request) {
         const r = sinError(await db().from("instrumentales").select("nombre").eq("id", inst).single()) as { nombre: string };
         await novedad(`Proceso «${nombre}» en ${r.nombre}`);
         return NextResponse.json({ ok: true });
+      }
+      case "pregunta_aviso": {
+        const n = await agregarPreguntaAviso(String(b.texto ?? ""), AUTOR);
+        return NextResponse.json({ ok: true, pendientes: n });
       }
       case "minimo": {
         const n = Number(b.minimo);
